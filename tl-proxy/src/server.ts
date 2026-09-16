@@ -477,9 +477,8 @@ export class ProxyServer {
           rawText: errFrame,
         });
 
-        // Write single error event and destroy socket
-        res.write(errFrame);
-        res.destroy();
+        // Write single error event and cleanly close stream
+        res.end(errFrame);
       }
     }
   }

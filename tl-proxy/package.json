@@ -4,20 +4,20 @@
   "description": "Independent TL two-stage model test proxy for Qwen and DeepSeek",
   "private": true,
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
   "bin": {
-    "tl-proxy": "dist/cli.js"
+    "tl-proxy": "dist/src/cli.js"
   },
   "files": [
-    "dist",
+    "dist/src",
     "README.md",
     ".env.example"
   ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "start": "node dist/cli.js",
+    "start": "node dist/src/cli.js",
     "dev": "node --experimental-strip-types src/cli.ts",
     "test": "node --test dist/test/*.test.js",
     "test:src": "node --experimental-strip-types --test test/*.test.ts"

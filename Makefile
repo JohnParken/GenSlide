@@ -28,7 +28,7 @@ test-unit:
 	$(UV) run python -m unittest discover tests -v
 
 run:
-	$(UV) run streamlit run frontend/app.py
+	$(UV) run streamlit run frontend/ui.py
 
 clean:
 	rm -rf .venv .pytest_cache __pycache__ */__pycache__ */*/__pycache__
