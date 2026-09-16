@@ -1,0 +1,4 @@
+interface:
+  display_name: "TL LLM Proxy"
+  short_description: "Build a TL gateway simulator for DeepSeek and Qwen"
+  default_prompt: "Use $tl-llm-proxy to implement a TypeScript/Node.js proxy that connects DeepSeek or qwen3.8-flash and exposes the fixed TL init_session/chat protocol with live text forwarding and no native tools."

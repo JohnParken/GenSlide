@@ -58,38 +58,72 @@ GenSlide/
 
 ### Install
 
-Clone the repository and create a virtual environment:
+#### Option 1: Using `uv` (Recommended)
+
+Install dependencies and set up the virtual environment automatically with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/mehdimo/GenSlide
 cd GenSlide
 
-python -m venv ./venv
-source ./venv/bin/activate          # Windows: venv\Scripts\activate
+# Sync environment (creates .venv and installs all dependencies including dev tools)
+uv sync
+
+# Or using Makefile
+make install
+```
+
+#### Option 2: Using traditional `venv` & `pip`
+
+```bash
+git clone https://github.com/mehdimo/GenSlide
+cd GenSlide
+
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
 pip install -r requirements.txt
 ```
 
 ### Configure
 
-Create a `.env` file in the project root and add the followings:
+Create a `.env` file in the project root and choose your LLM provider:
 
-To run with a local LLM: 
+**1. Local LLM (Offline Llama 3):**
 ```bash
 LLM_PROVIDER=local
 ```
 
-You can choose to work with OpenAI too. You then need to add OpenAI API key:
-
+**2. OpenAI (GPT-4o):**
 ```bash
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 ```
 
-Or export it directly in your shell:
+**3. Corporate Private Protocol (`chatbbc` / TL two-stage RPC):**
+```bash
+LLM_PROVIDER=chatbbc
+CHATBBC_BASE_URL=http://internal-gateway.company.com
+CHATBBC_APP_ID=genslide-app
+CHATBBC_TR_CODE=agent-chat
+# CHATBBC_AUTH_TOKEN=your_token
+```
+
+---
+
+## Testing
+
+Run the test suite using `uv`:
 
 ```bash
-export OPENAI_API_KEY=sk-...
+# Run with pytest via uv
+uv run pytest
+
+# Run with verbose output
+uv run pytest -v
+
+# Or using Makefile
+make test
 ```
 
 ---
@@ -99,8 +133,13 @@ export OPENAI_API_KEY=sk-...
 From the project root:
 
 ```bash
-streamlit run frontend/ui.py
+# Using uv
+uv run streamlit run frontend/ui.py
+
+# Or using Makefile
+make run
 ```
+
 
 The app opens in your browser at `http://localhost:8501`.
 

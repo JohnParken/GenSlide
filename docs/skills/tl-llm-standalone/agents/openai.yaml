@@ -1,0 +1,4 @@
+interface:
+  display_name: "TL LLM Standalone Provider"
+  short_description: "Connect QwenPaw to TL with prompt-based local tools"
+  default_prompt: "Use $tl-llm-standalone to implement a QwenPaw provider for the company TL init_session/chat API, encoding tools in system_prompt and adapting completed text responses to the existing AgentScope tool loop."

@@ -1,12 +1,23 @@
-# created by virtualenv automatically
-bin
-etc
-include
-lib
-share
+# Virtual environment
+.venv/
+bin/
+etc/
+include/
+lib/
+share/
 pyvenv.cfg
-tmp
+
+# Python & caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# IDE & OS
 .DS_Store
-.idea
-__pycache__
-gpt_models
+.idea/
+.vscode/
+
+# Project artifacts
+tmp/
+gpt_models/

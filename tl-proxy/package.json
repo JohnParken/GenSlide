@@ -1,0 +1,41 @@
+{
+  "name": "tl-proxy",
+  "version": "1.0.0",
+  "description": "Independent TL two-stage model test proxy for Qwen and DeepSeek",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "tl-proxy": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    ".env.example"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/cli.js",
+    "dev": "node --experimental-strip-types src/cli.ts",
+    "test": "node --test dist/test/*.test.js",
+    "test:src": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "engines": {
+    "node": "^22.22.1 || >=23.0.0"
+  },
+  "keywords": [
+    "tl",
+    "chatbbc",
+    "llm-proxy",
+    "deepseek",
+    "qwen"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2"
+  }
+}
