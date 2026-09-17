@@ -19,7 +19,7 @@ TL facade -> session store -> provider adapter -> /chat/completions
 每个进程配置一个 provider，切换环境变量即可在同一门面上测试 Qwen 或 DeepSeek；需要同时使用时启动两份实例。model、base URL、API key 由服务端固定，不能通过 TL 字段、name 变量或正文改变。默认单实例内存 session，不自动累积聊天历史。
 
 ```text
-tl-proxy/
+services/tl-proxy/
   package.json
   package-lock.json
   tsconfig.json

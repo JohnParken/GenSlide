@@ -6,10 +6,11 @@
 
 - [LangGraph 独立服务](../../services/genslide-langgraph/README.md)：固定 LangGraph 0.6.11。
 - [AgentScope 独立服务](../../services/genslide-agentscope/README.md)：固定 AgentScope 2.0.7.post1。
+- [TL 测试代理](../../services/tl-proxy/README.md)：chatbbc 两段式协议转换和公网模型联调。
 - [BFF 契约源](../../contracts/genslide-v1/README.md) 与两包各自的请求 JSON Schema。
 - [完整目标方案](synchronous-multiuser-content-platform.md)：P0–P8 是目标验收范围，不代表所有生产条件已在本机签收。
 
-两包各有 pyproject、uv.lock、源码、内置 skill、测试、Dockerfile、Kubernetes 模板和说明；不依赖根目录旧模块或另一服务包。根目录旧 Streamlit/PPT 工程保留，不改作生产 API 入口。用户原有 tl-proxy 修改未被覆盖。
+两包各有 pyproject、uv.lock、源码、内置 skill、测试、Dockerfile、Kubernetes 模板和说明；不依赖根目录旧模块或另一服务包。根目录旧 Streamlit/PPT 工程保留，不改作生产 API 入口。原有 TL 代理已作为独立服务迁移到 `services/tl-proxy`。
 
 ## 已实现内容
 
@@ -19,7 +20,7 @@
 | workflow.py | 澄清、建纲、修订、解释、确认、生成六个操作；逐步提问、建议选择、结构化需求更新；确认前不生成正文或文件 |
 | skills.py / skills/*/SKILL.md | 写作、DOCX、PPT 三类只读指令，版本及哈希校验；无 scripts、动态工具或任意代码执行 |
 | engine.py | LangGraph 原生图＋InMemorySaver；AgentScope 请求私有 AgentState＋白名单会话条目；BFF 提交后才发布本地状态 |
-| model.py / tl_transport.py | OpenAI-compatible 与现有 TL/ChatBBC 两步协议；AgentScope 真正调用原生 Agent/模型适配器；有界输入输出、超时、取消与零自动重试 |
+| model.py / tl_provider.py / tl_transport.py | 默认加载 TLProvider，`MODEL_PROVIDER=openai` 可显式切换 OpenAI-compatible；TL 使用 ChatBBC 两步协议；AgentScope 真正调用原生 Agent/模型适配器；有界输入输出、超时、取消与零自动重试 |
 | bff.py | claim、renew、result、查询、settle、附件下载和产物上传；BFF 是唯一权威状态服务 |
 | execution.py / config.py | Pod 准入、会话互斥、租约及截止时间、断连取消、提交竞态核对、请求私有目录、有界线程和可终止子进程 |
 | content_io.py | 本轮 TXT/Markdown/PDF/DOCX 解析，DOCX 与带封面/内容页/备注/结束页的 PPTX 输出；大小、页数和解压体积保护 |

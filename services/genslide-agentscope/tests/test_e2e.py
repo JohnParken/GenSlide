@@ -63,6 +63,11 @@ async def test_real_engine_bff_http_and_artifact_handoff(monkeypatch, kind):
                 assert len(model.calls) == 3  # confirmation is zero-model
                 assert result["content"]["sections"][0]["body"].startswith("这是完整正文")
                 assert len(result["files"]) == (0 if kind == "writing" else 1)
+                if result["files"]:
+                    artifact = await admin.get("/dev/artifacts/" + result["files"][0]["file_id"])
+                    assert artifact.status_code == 200
+                    assert artifact.content
+                    assert "attachment" in artifact.headers["content-disposition"]
                 assert len([e for e in events if e["event"] == "completed"]) == 4
                 stored = bff_app.state.actions[last_request.action_id]
                 assert stored["status"] == "committed"

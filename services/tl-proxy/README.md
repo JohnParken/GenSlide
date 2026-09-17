@@ -16,8 +16,8 @@ Independent TypeScript/Node.js testing proxy simulating the corporate `chatbbc` 
 ### 1. Installation
 
 ```bash
-cd tl-proxy
-npm install
+cd services/tl-proxy
+npm ci
 npm run build
 ```
 
@@ -70,9 +70,16 @@ npm test
 In GenSlide's `.env`, configure the ChatBBC / TL provider to point at `tl-proxy`:
 
 ```dotenv
-LLM_PROVIDER=tl
-TL_BASE_URL=http://127.0.0.1:8089
-CHATBBC_APP_ID=genslide-app
-CHATBBC_TR_CODE=agent-chat
-CHATBBC_SYS_VAR=system_prompt
+MODEL_PROVIDER=tl
+MODEL_BASE_URL=http://127.0.0.1:8089
+MODEL_API_KEY=local-proxy-key
+MODEL_NAME=qwen3.8-flash
 ```
+
+Both GenSlide services default to `MODEL_PROVIDER=tl`; setting it explicitly
+is recommended for readable deployment configuration. `MODEL_PROTOCOL=tl` remains a
+backward-compatible alias; if both variables are set they must have the same
+value. In local proxy mode `MODEL_API_KEY` may be a non-empty development
+placeholder. With `AUTH_MODE=bearer`, set it to the proxy's `TEST_ACCESS_TOKEN`.
+The upstream model and public API key stay in this proxy's `UPSTREAM_*`
+variables and are never sent to GenSlide.

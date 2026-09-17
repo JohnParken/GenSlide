@@ -6,11 +6,62 @@
 
 - [LangGraph 服务：安装、BFF 接口与部署](services/genslide-langgraph/README.md)
 - [AgentScope 2.0.7.post1 服务：安装、BFF 接口与部署](services/genslide-agentscope/README.md)
+- [TL 测试代理：chatbbc 两段式协议转 Qwen/DeepSeek](services/tl-proxy/README.md)
 - [一期实现记录与待完成的生产验收](docs/architecture/phase1-implementation-status.md)
 
 两版均支持逐步引导、大纲确认、写作、DOCX、PPTX、同步 JSON/SSE 与 BFF 交接；
 不依赖数据库或 Redis。运行时使用 Pod 内存，需要会话亲和。
 生产请使用各服务自己的依赖和入口，不使用根目录旧 Streamlit 启动方式。
+
+### 文档生成聊天测试页
+
+`frontend/service_chat.py` 是只用于本地联调的 Streamlit 页面，可以在
+LangGraph 和 AgentScope 之间切换，完成澄清、建纲、修订、确认、生成和 DOCX 下载。
+
+先准备两个服务各自的虚拟环境及模型配置，然后使用同一组开发环境变量：
+
+```bash
+export GENSLIDE_ENV=development
+export GENSLIDE_ALLOW_MOCK=1
+export GENSLIDE_SERVICE_TOKEN=local-development-token-at-least-32-characters
+export GENSLIDE_BFF_URL=http://127.0.0.1:8010/internal/genslide/v1
+# MODEL_PROVIDER 未设置时，两个服务默认加载 TLProvider
+export MODEL_BASE_URL=http://127.0.0.1:8089
+export MODEL_API_KEY=local-proxy-key
+export MODEL_NAME=qwen3.8-flash
+```
+
+先在 `services/tl-proxy/.env` 配置 `UPSTREAM_*`，然后分别启动 TL proxy、mock BFF 和两个服务：
+
+```bash
+cd services/tl-proxy
+npm ci
+npm run build
+npm start
+
+# 另一终端：mock BFF
+cd services/genslide-langgraph
+uv run --locked uvicorn genslide_langgraph.mock_bff:create_mock_bff --factory --host 127.0.0.1 --port 8010
+
+# 另一终端：LangGraph
+cd services/genslide-langgraph
+uv run --locked uvicorn genslide_langgraph.api:create_app --factory --host 127.0.0.1 --port 8001
+
+# 另一终端：AgentScope
+cd services/genslide-agentscope
+uv run --locked uvicorn genslide_agentscope.api:create_app --factory --host 127.0.0.1 --port 8002
+```
+
+若要改用 OpenAI-compatible provider，显式设置 `MODEL_PROVIDER=openai`。
+最后在仓库根目录启动页面：
+
+```bash
+uv run streamlit run frontend/service_chat.py
+```
+
+默认地址为 `http://127.0.0.1:8501`。页面会让你确认 BFF、两个服务和 token 地址；
+切换引擎会创建新会话，不会复用另一引擎的内存状态。
+
 以下内容保留为旧工程说明。
 
 > Text and document to PowerPoint slide generation powered by a **LangGraph agentic pipeline** and **GPT-4o**.

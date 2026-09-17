@@ -17,4 +17,4 @@ COPY --from=builder /app/dist ./dist
 EXPOSE 8089
 USER node
 
-CMD ["node", "dist/cli.js"]
+CMD ["node", "dist/src/cli.js"]

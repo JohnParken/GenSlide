@@ -2,7 +2,9 @@
 import asyncio
 import json
 import os
+from .config import model_provider_from_env
 from .domain import ServiceError
+from .tl_provider import TLProvider
 
 MAX_INPUT_BYTES = 60000
 MAX_OUTPUT_BYTES = 160000
@@ -43,12 +45,14 @@ from agentscope.formatter import OpenAIChatFormatter
 
 class SDKTLModel(ChatModelBase):
     """Native AgentScope model adapter for the existing two-step TL protocol."""
-    def __init__(self, base, key, name):
-        from .tl_transport import TLClient
-        super().__init__(credential=OpenAICredential(api_key=key, base_url=base),
-                         model=name, parameters=self.Parameters(), stream=False,
+    def __init__(self, provider: TLProvider):
+        super().__init__(credential=OpenAICredential(
+                             api_key=provider.transport.key,
+                             base_url=provider.transport.base_url),
+                         model=provider.model_name, parameters=self.Parameters(), stream=False,
                          max_retries=0, context_size=128000)
-        self.transport = TLClient(base, key)
+        self.provider = provider
+        self.transport = provider.transport
         self.formatter = OpenAIChatFormatter()
 
     async def _call_api(self, model_name, messages, tools=None, tool_choice=None, **kwargs):
@@ -56,18 +60,18 @@ class SDKTLModel(ChatModelBase):
             raise ServiceError("TOOLS_NOT_ALLOWED", 422)
         system = "\n".join(m.get_text_content() or "" for m in messages if m.role == "system")
         user = "\n".join(m.get_text_content() or "" for m in messages if m.role != "system")
-        text = await self.transport.complete(system, user)
+        text = await self.provider.complete(system, user)
         return ChatResponse(content=[TextBlock(text=text)], is_last=True)
 
 class Model:
     def __init__(self):
         base, key, name = model_settings()
-        protocol = os.environ.get("MODEL_PROTOCOL", "openai")
-        if protocol == "tl":
-            self.sdk_model = SDKTLModel(base, key, name)
+        self.provider_name = model_provider_from_env()
+        self.tl_provider = None
+        if self.provider_name == "tl":
+            self.tl_provider = TLProvider(base, key, name)
+            self.sdk_model = SDKTLModel(self.tl_provider)
             return
-        if protocol != "openai":
-            raise RuntimeError("MODEL_PROTOCOL must be openai or tl")
         self.sdk_model = OpenAIChatModel(
             credential=OpenAICredential(api_key=key, base_url=base),
             model=name, stream=False, max_retries=0,
@@ -100,7 +104,8 @@ class Model:
             raise ServiceError("MODEL_UNAVAILABLE", 502) from exc
 
     async def aclose(self):
-        if isinstance(self.sdk_model, SDKTLModel):
-            await self.sdk_model.transport.aclose()
+        tl_provider = getattr(self, "tl_provider", None)
+        if tl_provider is not None:
+            await tl_provider.aclose()
         else:
             await self.sdk_model.client.close()

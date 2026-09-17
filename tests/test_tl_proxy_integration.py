@@ -60,7 +60,7 @@ class TestTLProxyIntegration(unittest.TestCase):
 
         # 2. Start tl-proxy CLI process pointing to mock upstream
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        tl_proxy_dir = os.path.join(repo_root, "tl-proxy")
+        tl_proxy_dir = os.path.join(repo_root, "services", "tl-proxy")
 
         env = os.environ.copy()
         env["TL_PROXY_HOST"] = "127.0.0.1"

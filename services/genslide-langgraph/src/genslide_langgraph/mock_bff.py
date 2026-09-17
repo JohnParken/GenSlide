@@ -212,6 +212,27 @@ def create_mock_bff():
                       "owner": tuple(str(form.get(k, "")) for k in ("tenant_id", "user_id", "session_id"))}
         return {"file_id": fid}
 
+    @app.get("/dev/artifacts/{file_id}")
+    async def get_artifact(file_id: str):
+        """Download a committed generated artifact from the development simulator."""
+        file = files.get(file_id)
+        action = actions.get(file.get("action_id")) if file else None
+        committed_files = action.get("result", {}).get("files", []) if action else []
+        if (
+            not file
+            or not action
+            or action.get("status") != "committed"
+            or not any(ref.get("file_id") == file_id for ref in committed_files)
+        ):
+            raise HTTPException(404, "ARTIFACT_NOT_FOUND")
+        suffix = PurePosixPath(file["filename"]).suffix.lower()
+        filename = "generated" + suffix if suffix in (".docx", ".pptx") else "generated.bin"
+        return Response(
+            file["data"],
+            media_type=file["content_type"],
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     @app.post(PREFIX + "/actions/{action_id}/files/{file_id}/download")
     async def download(action_id: str, file_id: str, body: dict):
         action = lookup(action_id, body)
@@ -242,8 +263,11 @@ def create_mock_bff():
         if len(data) > MAX_BYTES or len(files) >= 100:
             raise HTTPException(413, "FILE_TOO_LARGE_OR_MOCK_FULL")
         fid = uuid4().hex
-        files[fid] = {"data": data, "action_id": action_id}
-        return {"file_id": fid, "filename": PurePosixPath(file.filename).name,
-                "content_type": file.content_type or "application/octet-stream", "size": len(data)}
+        filename = PurePosixPath(file.filename).name
+        content_type = file.content_type or "application/octet-stream"
+        files[fid] = {"data": data, "action_id": action_id, "filename": filename,
+                      "content_type": content_type}
+        return {"file_id": fid, "filename": filename,
+                "content_type": content_type, "size": len(data)}
 
     return app

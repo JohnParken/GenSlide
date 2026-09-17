@@ -2,7 +2,9 @@
 import asyncio
 import json
 import os
+from .config import model_provider_from_env
 from .domain import ServiceError
+from .tl_provider import TLProvider
 
 MAX_INPUT_BYTES = 60000
 MAX_OUTPUT_BYTES = 160000
@@ -38,14 +40,13 @@ import httpx
 class Model:
     def __init__(self):
         base, key, self.name = model_settings()
+        self.provider_name = model_provider_from_env()
+        self.tl_provider = None
         self.tl = None
-        protocol = os.environ.get("MODEL_PROTOCOL", "openai")
-        if protocol == "tl":
-            from .tl_transport import TLClient
-            self.tl = TLClient(base, key)
+        if self.provider_name == "tl":
+            self.tl_provider = TLProvider(base, key, self.name)
+            self.tl = self.tl_provider
             return
-        if protocol != "openai":
-            raise RuntimeError("MODEL_PROTOCOL must be openai or tl")
         self.client = httpx.AsyncClient(
             base_url=base.rstrip("/") + "/", headers={"Authorization": "Bearer " + key},
             timeout=httpx.Timeout(120, connect=10), follow_redirects=False,
@@ -53,8 +54,8 @@ class Model:
         )
 
     async def complete(self, system, payload):
-        if self.tl is not None:
-            return decode_output(await self.tl.complete(system, encode_payload(payload)))
+        if self.tl_provider is not None:
+            return decode_output(await self.tl_provider.complete(system, encode_payload(payload)))
         data = {"model": self.name, "temperature": 0.2, "max_tokens": 12000,
                 "messages": [{"role": "system", "content": system},
                              {"role": "user", "content": encode_payload(payload)}]}
@@ -76,7 +77,8 @@ class Model:
             raise ServiceError("MODEL_UNAVAILABLE", 502) from exc
 
     async def aclose(self):
-        if self.tl is not None:
-            await self.tl.aclose()
+        tl_provider = getattr(self, "tl_provider", None)
+        if tl_provider is not None:
+            await tl_provider.aclose()
         else:
             await self.client.aclose()

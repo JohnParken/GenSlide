@@ -6,7 +6,8 @@ import json
 ROOT = Path(__file__).resolve().parents[1] / "services"
 ENGINES = ("langgraph", "agentscope")
 COMMON = ("domain.py", "workflow.py", "skills.py", "content_io.py", "bff.py",
-          "config.py", "execution.py", "api.py", "mock_bff.py", "tl_transport.py")
+          "config.py", "execution.py", "api.py", "mock_bff.py", "tl_transport.py",
+          "tl_provider.py")
 
 
 def main():

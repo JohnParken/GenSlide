@@ -7,6 +7,31 @@ import math
 from urllib.parse import urlsplit
 
 
+_MODEL_PROVIDERS = frozenset({"openai", "tl"})
+
+
+def _model_provider(*, provider: str | None, protocol: str | None) -> str:
+    configured = []
+    for name, value in (("MODEL_PROVIDER", provider), ("MODEL_PROTOCOL", protocol)):
+        if value is None:
+            continue
+        value = value.strip().lower()
+        if value not in _MODEL_PROVIDERS:
+            raise ValueError(f"{name} must be openai or tl")
+        configured.append((name, value))
+    if len(configured) == 2 and configured[0][1] != configured[1][1]:
+        raise ValueError("MODEL_PROVIDER and MODEL_PROTOCOL must match")
+    return configured[0][1] if configured else "tl"
+
+
+def model_provider_from_env() -> str:
+    """Resolve the primary model provider and its legacy protocol alias."""
+    return _model_provider(
+        provider=os.environ.get("MODEL_PROVIDER"),
+        protocol=os.environ.get("MODEL_PROTOCOL"),
+    )
+
+
 def _number(name: str, default: str, *, integer: bool = False) -> int | float:
     value = os.getenv(name, default)
     try:
@@ -27,6 +52,7 @@ class Settings:
     model_base_url: str | None = None
     model_api_key: str | None = field(default=None, repr=False)
     model_name: str | None = None
+    provider: str = "tl"
     bff_timeout_seconds: float = 10.0
     control_timeout_seconds: float = 5.0
     renew_interval_seconds: float = 10.0
@@ -51,6 +77,8 @@ class Settings:
             raise ValueError("GENSLIDE_ENV must be development, test, or production")
         if self.engine_name != "langgraph":
             raise ValueError("engine_name is fixed by this package")
+        if self.provider not in _MODEL_PROVIDERS:
+            raise ValueError("provider must be openai or tl")
         if self.bff_url:
             parsed = urlsplit(self.bff_url)
             if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
@@ -130,6 +158,7 @@ class Settings:
             model_base_url=os.getenv("MODEL_BASE_URL") or None,
             model_api_key=os.getenv("MODEL_API_KEY") or None,
             model_name=os.getenv("MODEL_NAME") or None,
+            provider=model_provider_from_env(),
             bff_timeout_seconds=float(_number("GENSLIDE_BFF_TIMEOUT_SECONDS", "10")),
             control_timeout_seconds=float(_number("GENSLIDE_CONTROL_TIMEOUT_SECONDS", "5")),
             renew_interval_seconds=float(_number("GENSLIDE_RENEW_INTERVAL_SECONDS", "10")),

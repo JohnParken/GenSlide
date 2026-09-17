@@ -32,7 +32,8 @@ uv run --locked pytest -q
 | MODEL_BASE_URL | OpenAI-compatible 的 `.../v1` 基址，或 TL 服务根地址 |
 | MODEL_API_KEY | 模型服务凭据，不进入日志或请求响应 |
 | MODEL_NAME | 目标模型名；TL 模式也需配置一个可追溯名称 |
-| MODEL_PROTOCOL | `openai`（默认）或 `tl` |
+| MODEL_PROVIDER | `tl`（默认）或 `openai`；模型 provider 主选择变量 |
+| MODEL_PROTOCOL | `openai` 或 `tl`；兼容别名，与 `MODEL_PROVIDER` 同时设置时必须一致 |
 
 ```sh
 uv run --locked uvicorn genslide_agentscope.api:create_app --factory \
@@ -43,6 +44,19 @@ uv run --locked uvicorn genslide_agentscope.api:create_app --factory \
 内部明文 HTTP 只适用于已隔离的可信网络；跨网络须 TLS/mTLS，由平台配置。
 TL 模式通过 `/chatbbc/init_session`、`/chatbbc/chat` 两步协议调用，无轮询、无自动重试。
 可用 `TL_APP_ID`、`TL_TR_CODE`、`TL_TR_VERSION`、`TL_SYSTEM_VARIABLE` 对齐现有网关。
+本地可配合 [`services/tl-proxy`](../tl-proxy/README.md) 联调：
+
+```dotenv
+# 未设置 MODEL_PROVIDER/MODEL_PROTOCOL 时默认使用 TL
+MODEL_PROVIDER=tl
+MODEL_BASE_URL=http://127.0.0.1:8089
+MODEL_API_KEY=local-proxy-key
+MODEL_NAME=qwen3.8-flash
+```
+
+如需显式使用 OpenAI-compatible provider，设置 `MODEL_PROVIDER=openai`。
+
+`MODEL_PROTOCOL=tl` 仅作为兼容别名；若与 `MODEL_PROVIDER` 同时设置，两者必须一致。
 对 BFF 的 SSE 是业务阶段进度，不是模型原始 token/推理流。
 
 ## Skill 自动发现
