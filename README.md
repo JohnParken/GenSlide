@@ -1,5 +1,18 @@
 # GenSlide — Agentic PowerPoint Generation
 
+## 云端一期 API（双框架独立服务）
+
+新增的云端 API 与下方旧 Streamlit 工程分开部署：
+
+- [LangGraph 服务：安装、BFF 接口与部署](services/genslide-langgraph/README.md)
+- [AgentScope 2.0.7.post1 服务：安装、BFF 接口与部署](services/genslide-agentscope/README.md)
+- [一期实现记录与待完成的生产验收](docs/architecture/phase1-implementation-status.md)
+
+两版均支持逐步引导、大纲确认、写作、DOCX、PPTX、同步 JSON/SSE 与 BFF 交接；
+不依赖数据库或 Redis。运行时使用 Pod 内存，需要会话亲和。
+生产请使用各服务自己的依赖和入口，不使用根目录旧 Streamlit 启动方式。
+以下内容保留为旧工程说明。
+
 > Text and document to PowerPoint slide generation powered by a **LangGraph agentic pipeline** and **GPT-4o**.
 
 >For the single local LLM version explained [here](https://medium.com/data-science/how-to-use-llms-to-create-presentation-slides-genslide-a-step-by-step-guide-31f7588ffb5e) refer to [v0.1.0](https://github.com/mehdimo/GenSlide/tree/v0.1.0).

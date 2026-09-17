@@ -1,0 +1,11 @@
+{
+  "skill_id": "document",
+  "version": "1",
+  "target_kind": "document",
+  "instructions": {
+    "clarify": "Help develop an editable Word/WPS document. Clarify its purpose, readers, section needs and tone, one important question at a time.",
+    "outline": "Create a document chapter structure appropriate to the requested report or proposal. Keep neutral section titles and stable IDs; avoid full body text.",
+    "generate": "Write complete document prose section by section, compatible with an editable DOCX. Do not generate slides or a second writing artifact."
+  }
+}
+

@@ -17,10 +17,11 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "prestart": "npm run build",
     "start": "node dist/src/cli.js",
-    "dev": "node --experimental-strip-types src/cli.ts",
+    "dev": "tsx watch src/cli.ts",
     "test": "node --test dist/test/*.test.js",
-    "test:src": "node --experimental-strip-types --test test/*.test.ts"
+    "test:src": "tsx --test test/*.test.ts"
   },
   "engines": {
     "node": "^22.22.1 || >=23.0.0"
@@ -36,6 +37,7 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@types/node": "^22.13.10",
+    "tsx": "^4.23.13",
     "typescript": "^5.8.2"
   }
 }

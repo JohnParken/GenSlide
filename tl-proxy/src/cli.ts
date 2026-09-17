@@ -8,6 +8,22 @@ import { loadConfigFromEnv, validateConfig } from "./config.js";
 import { createProxy } from "./server.js";
 
 async function main() {
+  if (typeof process.loadEnvFile === "function") {
+    try {
+      process.loadEnvFile();
+    } catch {
+      try {
+        process.loadEnvFile(new URL("../../.env", import.meta.url));
+      } catch {
+        try {
+          process.loadEnvFile(new URL("../.env", import.meta.url));
+        } catch {
+          // Ambient process.env will be used
+        }
+      }
+    }
+  }
+
   const config = loadConfigFromEnv();
 
   try {

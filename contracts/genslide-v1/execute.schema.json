@@ -1,0 +1,182 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "api_contract_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Api Contract Version",
+      "type": "string"
+    },
+    "engine": {
+      "enum": [
+        "langgraph",
+        "agentscope"
+      ],
+      "title": "Engine",
+      "type": "string"
+    },
+    "tenant_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "user_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "User Id",
+      "type": "string"
+    },
+    "session_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Session Id",
+      "type": "string"
+    },
+    "runtime_epoch": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Runtime Epoch",
+      "type": "string"
+    },
+    "action_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,128}$",
+      "title": "Action Id",
+      "type": "string"
+    },
+    "authorization": {
+      "format": "password",
+      "title": "Authorization",
+      "type": "string",
+      "writeOnly": true
+    },
+    "expected_session_version": {
+      "minimum": 0,
+      "title": "Expected Session Version",
+      "type": "integer"
+    },
+    "operation": {
+      "enum": [
+        "clarify",
+        "create_outline",
+        "revise_outline",
+        "explain_outline",
+        "confirm_outline",
+        "generate"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "target_kind": {
+      "enum": [
+        "writing",
+        "document",
+        "presentation"
+      ],
+      "title": "Target Kind",
+      "type": "string"
+    },
+    "message": {
+      "default": "",
+      "maxLength": 16000,
+      "title": "Message",
+      "type": "string"
+    },
+    "current_file_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Current File Ids",
+      "type": "array"
+    },
+    "draft_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Draft Id"
+    },
+    "expected_outline_version": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Outline Version"
+    },
+    "answers": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "maxProperties": 3,
+      "title": "Answers",
+      "type": "object"
+    },
+    "accepted_proposal_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 3,
+      "title": "Accepted Proposal Ids",
+      "type": "array"
+    },
+    "requirement_updates": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Requirement Updates",
+      "type": "object"
+    },
+    "requires_materials": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Requires Materials"
+    },
+    "skill_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Skill Id"
+    }
+  },
+  "required": [
+    "engine",
+    "tenant_id",
+    "user_id",
+    "session_id",
+    "runtime_epoch",
+    "action_id",
+    "authorization",
+    "expected_session_version",
+    "operation",
+    "target_kind"
+  ],
+  "title": "ExecuteRequest",
+  "type": "object"
+}
+

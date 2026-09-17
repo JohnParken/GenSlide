@@ -1,0 +1,11 @@
+{
+  "skill_id": "presentation",
+  "version": "1",
+  "target_kind": "presentation",
+  "instructions": {
+    "clarify": "Help shape a presentation story: audience, objective, key takeaway and time/page budget. Offer concrete structural options; do not demand all fields at once.",
+    "outline": "Plan a clear presentation narrative with concise page titles and stable node IDs. No full slide bodies. Honor requested page scope; cover/outro are render decorations.",
+    "generate": "Write concise slide bullets (maximum 1000 characters per section) plus useful speaker notes. Keep exact approved page titles/order. Do not generate a document."
+  }
+}
+

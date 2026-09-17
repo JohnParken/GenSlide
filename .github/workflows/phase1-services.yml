@@ -1,0 +1,28 @@
+name: Phase-one independent services
+on:
+  push:
+    paths: ['services/**', 'tools/check_service_parity.py', '.github/workflows/phase1-services.yml']
+  pull_request:
+    paths: ['services/**', 'tools/check_service_parity.py', '.github/workflows/phase1-services.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        engine: [langgraph, agentscope]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.10.2'
+          python-version: '3.12'
+      - run: uv sync --frozen
+        working-directory: services/genslide-${{ matrix.engine }}
+      - run: uv run --locked pytest -q
+        working-directory: services/genslide-${{ matrix.engine }}
+      - run: uv run --locked python ../../tools/check_service_parity.py
+        working-directory: services/genslide-${{ matrix.engine }}
+      - run: uv build
+        working-directory: services/genslide-${{ matrix.engine }}
