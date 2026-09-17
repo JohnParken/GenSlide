@@ -45,6 +45,58 @@ TL 模式通过 `/chatbbc/init_session`、`/chatbbc/chat` 两步协议调用，�
 可用 `TL_APP_ID`、`TL_TR_CODE`、`TL_TR_VERSION`、`TL_SYSTEM_VARIABLE` 对齐现有网关。
 对 BFF 的 SSE 是业务阶段进度，不是模型原始 token/推理流。
 
+## Skill 自动发现
+
+启动时仅扫描包内 `src/genslide_langgraph/skills/<子目录>/SKILL.md`，
+按 Markdown frontmatter 的 `name` 注册，不依赖硬编码清单，不递归加载辅助文件。
+JSON skill 不再受支持，遗留 JSON 文件不会被注册；仅含 JSON 的目录会因无有效 skill 而启动失败。
+也可设置 `GENSLIDE_SKILLS_DIR=/absolute/path/to/skills` 指向可信、只读的部署目录；
+指定目录会**替代**包内目录，不自动合并或覆盖。新增、修改、删除文件后重启服务生效，
+不热更新当前请求；一期重启仍会丢失内存会话。
+
+未指定 ID 时，首次默认寻找与 target_kind 同名的 skill；
+已有大纲的后续操作继承该大纲绑定的 skill。一个类型可注册多个 skill，
+但不会由模型自动选择，也不能通过 skill 文件新增产物类型或执行阶段。
+更换已有大纲的 skill 需重新创建并确认大纲；ID、版本及内容哈希仍参与校验。
+删除默认 skill 后，未显式选择该类型其他 skill 的请求会返回 `SKILL_NOT_FOUND`。
+
+无效 YAML、重复 name、未知字段、空指令、符号链接会阻止启动，不静默忽略。
+目录至少 1 个、最多 128 个 skill；单文件最多 64 KiB，各阶段指令最多 4000 字符。
+正文用于当前 clarify/outline/generate 阶段，仅支持现有三类目标；不会加载 Python、scripts、
+用户上传文件或任意工具。目录是服务管理员管理的可信配置，不接受请求指定加载路径。
+两包使用同一批 skill 时，可分别部署相同目录副本；无需互相 import。
+
+### SKILL.md 格式（唯一支持格式）
+
+内置示例：`src/genslide_langgraph/skills/business-report/SKILL.md`。
+请求使用 `skill_id="business-report", target_kind="writing"`。
+
+```markdown
+---
+name: business-report
+description: 引导用户完善需求并生成商业报告。
+metadata:
+  version: "1"
+  target_kind: writing
+---
+
+# 商业报告
+
+先澄清受众、目的和篇幅，再生成大纲；用户确认后才生成正文。
+严格遵循已确认大纲，不编造数据。
+```
+
+`name` 和非空 `description` 必填；`metadata` 可省略，值均须为字符串。
+`metadata.version` 默认 `"1"`，`metadata.target_kind` 可限定产物类型；
+不限定时可被三类产物显式选用，但不改变请求指定的产物类型。
+正文非空且不超过 4000 字符，统一作为各阶段的附加指令。
+description 用于描述，不触发自动选用；服务端阶段校验和输出 schema 仍有效。
+可选的 `license`、`compatibility`、`allowed-tools` 仅接收字符串元信息，
+其中 allowed-tools **不授予任何工具执行能力**。YAML 安全加载，拒绝重复键、锚点、
+别名和自定义标签；完整文件内容哈希用于绑定大纲。
+`scripts/`、`references/`、`assets/` 不执行、不自动加载。
+这是 SKILL.md 指令格式兼容，不是其他 Agent 产品完整执行环境的兼容。
+
 ## BFF 契约
 
 精确请求 schema 见 `contracts/execute.schema.json` 与 `src/genslide_langgraph/domain.py`；线上 OpenAPI/Swagger 路由默认关闭。

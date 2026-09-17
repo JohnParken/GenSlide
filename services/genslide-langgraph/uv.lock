@@ -160,6 +160,7 @@ dependencies = [
     { name = "python-docx" },
     { name = "python-multipart" },
     { name = "python-pptx" },
+    { name = "pyyaml" },
     { name = "uvicorn" },
 ]
 
@@ -180,6 +181,7 @@ requires-dist = [
     { name = "python-docx", specifier = "==1.2.0" },
     { name = "python-multipart", specifier = "==0.0.32" },
     { name = "python-pptx", specifier = "==1.0.2" },
+    { name = "pyyaml", specifier = "==6.0.3" },
     { name = "uvicorn", specifier = "==0.53.0" },
 ]
 

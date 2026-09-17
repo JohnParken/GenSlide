@@ -17,7 +17,7 @@
 | --- | --- |
 | api.py / domain.py | 严格输入 schema、内部服务认证、请求体上限、JSON/SSE、脱敏错误、健康探针及受保护的容量指标 |
 | workflow.py | 澄清、建纲、修订、解释、确认、生成六个操作；逐步提问、建议选择、结构化需求更新；确认前不生成正文或文件 |
-| skills.py / skills/*.json | 写作、DOCX、PPT 三类只读阶段指令，版本及哈希校验；无 scripts、动态工具或任意代码执行 |
+| skills.py / skills/*/SKILL.md | 写作、DOCX、PPT 三类只读指令，版本及哈希校验；无 scripts、动态工具或任意代码执行 |
 | engine.py | LangGraph 原生图＋InMemorySaver；AgentScope 请求私有 AgentState＋白名单会话条目；BFF 提交后才发布本地状态 |
 | model.py / tl_transport.py | OpenAI-compatible 与现有 TL/ChatBBC 两步协议；AgentScope 真正调用原生 Agent/模型适配器；有界输入输出、超时、取消与零自动重试 |
 | bff.py | claim、renew、result、查询、settle、附件下载和产物上传；BFF 是唯一权威状态服务 |
@@ -69,6 +69,29 @@ LangGraph 依赖导入存在一条关于未来 allowed_objects 默认值变化�
 建议下一步先接真实 BFF 测试环境和合成模型样例；上述验收完成前不要将“本地测试通过”标记为 P8 生产上线完成。
 
 ## Main-agent work
+
+2026-09-17 Markdown-only 调整：移除 JSON skill 加载，六份内置 JSON 文件迁移为
+两包各自 writing/document/presentation/SKILL.md，原 ID 和阶段指引保留。
+遗留 JSON 文件不注册，JSON-only 目录按空目录拒绝启动；业务 API JSON 协议不受影响。
+主代理修改发现器、内置资源、README 和一致性检查，并验证 wheel 无 JSON skill、
+四个 Markdown skill 可正常发现。子代理 `luna__md_only_tests`（Luna Medium）一次调用
+负责两包测试迁移及 JSON 不再注册的回归用例。
+
+2026-09-17 SKILL.md 支持：两包新增安全 YAML frontmatter＋Markdown 正文解析，
+扫描直接子目录的 SKILL.md；后续按用户要求移除 JSON 兼容，重复 name 拒绝启动。
+可选 metadata.version/target_kind；缺省类型可用于三类产物，服务端流程约束不变。
+新增 business-report 示例、直接 PyYAML 依赖及锁记录；wheel 中的资源发现已验证。
+不执行脚本或加载辅助资源；启动后文件变更须重启，仍接受一期内存丢失限制。
+主代理完成解析器、依赖、示例、文档、打包检查及目标约束/文件符号链接补充测试；
+`luna__skill_md_tests`（Luna Medium）一次调用负责两包 Markdown 加载与工作流测试。
+
+2026-09-17 补充：两包 skill 改为启动时目录发现和按 ID 注册，支持
+`GENSLIDE_SKILLS_DIR` 替代内置目录，无需代码清单。保留指令白名单、目标类型、
+版本/哈希及大纲绑定；不执行脚本、不热加载。当前使用和 Markdown 示例见各包 README。
+本次完整回归 LangGraph 56 项、AgentScope 57 项通过，副本一致性检查通过。
+主代理实现发现器、草稿继承、动态资源一致性检查及文档；新增子代理
+`luna__skill_discovery_tests`（Luna Medium）一次调用负责两包发现与流程测试，
+主代理复核并补充删除后快照不变及重新加载测试。原生产验收待办保持不变。
 
 确定两包契约、安全和状态边界；实现领域/引导/skill/框架与模型接入、模拟 BFF、依赖及部署；集成并修正取消竞态、SSE 结束通知、SDK TL formatter、内容边界及资源限制；补充端到端/独立安装/旧工程回归与交付说明。
 

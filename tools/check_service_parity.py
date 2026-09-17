@@ -20,10 +20,14 @@ def main():
             sources.append(text)
         if sources[0] != sources[1]:
             raise SystemExit(f"Shared contract/behavior drift: {name}")
-    for kind in ("writing", "document", "presentation"):
-        resources = [(ROOT / f"genslide-{e}" / "src" / f"genslide_{e}" / "skills" / f"{kind}.json").read_bytes() for e in ENGINES]
-        if resources[0] != resources[1]:
-            raise SystemExit(f"Skill drift: {kind}")
+    resources = [
+        {p.relative_to(root).as_posix(): p.read_bytes()
+         for root in [ROOT / f"genslide-{e}" / "src" / f"genslide_{e}" / "skills"]
+         for p in root.glob("*/SKILL.md")}
+        for e in ENGINES
+    ]
+    if resources[0] != resources[1]:
+        raise SystemExit("Skill inventory/content drift")
     manifests = [tomllib.loads((ROOT / f"genslide-{e}" / "pyproject.toml").read_text()) for e in ENGINES]
     common = [set(d for d in m["project"]["dependencies"] if not d.startswith(ENGINES)) for m in manifests]
     if common[0] != common[1]:

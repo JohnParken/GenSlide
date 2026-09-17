@@ -30,8 +30,13 @@ only, not file-derived facts, quotes, summaries or body paragraphs."""
 
 async def execute(request: ExecuteRequest, memory: Memory, materials: str, model, skills: SkillRegistry) -> WorkResult:
     memory = memory.model_copy(deep=True)
-    skill = skills.get(request.target_kind, request.skill_id)
     op = request.operation
+    if memory.outline and memory.outline.target_kind != request.target_kind and op != "create_outline":
+        raise ServiceError("TARGET_KIND_MISMATCH")
+    requested_skill = request.skill_id
+    if requested_skill is None and memory.outline and op != "create_outline":
+        requested_skill = memory.outline.skill_id
+    skill = skills.get(request.target_kind, requested_skill)
     old_hash = confirmation_hash(memory) if memory.outline else None
     questions = {q.question_id: q for q in memory.guidance.questions}
     proposals = {p.proposal_id: p for p in memory.guidance.proposals}
@@ -55,8 +60,6 @@ async def execute(request: ExecuteRequest, memory: Memory, materials: str, model
         if memory.outline and op == "clarify" and memory.outline.requires_materials != memory.requires_materials:
             memory.outline.requires_materials = memory.requires_materials
             memory.outline.confirmed_hash = None
-    if memory.outline and memory.outline.target_kind != request.target_kind and op != "create_outline":
-        raise ServiceError("TARGET_KIND_MISMATCH")
     if memory.outline and old_hash != confirmation_hash(memory):
         memory.outline.confirmed_hash = None
     if op in {"revise_outline", "explain_outline", "confirm_outline", "generate"}:
@@ -64,7 +67,9 @@ async def execute(request: ExecuteRequest, memory: Memory, materials: str, model
             raise ServiceError("OUTLINE_REQUIRED")
         if request.draft_id != memory.outline.draft_id or request.expected_outline_version != memory.outline.outline_version:
             raise ServiceError("OUTLINE_VERSION_CONFLICT")
-        if memory.outline.skill_hash != skill["hash"] or memory.outline.skill_version != skill["version"]:
+        if (memory.outline.skill_id != skill["skill_id"]
+                or memory.outline.skill_hash != skill["hash"]
+                or memory.outline.skill_version != skill["version"]):
             raise ServiceError("SKILL_VERSION_UNAVAILABLE")
     payload = {
         "operation": op, "target_kind": request.target_kind,
