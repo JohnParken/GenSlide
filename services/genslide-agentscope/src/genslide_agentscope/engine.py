@@ -14,6 +14,12 @@ class Engine:
         self.committed = {}
         self.turn_counts = {}
 
+    def list_skills(self):
+        return self.skills.list_skills()
+
+    def reload_skills(self):
+        return self.skills.reload()
+
     async def read(self, key):
         memory = self.committed.get(key)
         return memory.model_copy(deep=True) if memory is not None else None

@@ -59,7 +59,7 @@ def test_invalid_metadata_fails(tmp_path, metadata):
         SkillRegistry(tmp_path)
 
 
-@pytest.mark.parametrize("kwargs", [{"name": ""}, {"description": " "}, {"body": " "}, {"body": "x" * 4001}])
+@pytest.mark.parametrize("kwargs", [{"name": ""}, {"description": " "}, {"body": " "}, {"body": "x" * 65537}])
 def test_blank_or_oversize_markdown_fields_fail(tmp_path, kwargs):
     write_md(tmp_path, **kwargs)
     with pytest.raises(ValueError):

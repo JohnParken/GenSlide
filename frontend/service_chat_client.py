@@ -25,6 +25,7 @@ class ChatState:
     session_version: int = 0
     draft: dict[str, Any] | None = None
     guidance: dict[str, Any] = field(default_factory=dict)
+    requirements: dict[str, str] = field(default_factory=dict)
     answer: str = ""
     content: dict[str, Any] | None = None
     artifacts: list[dict[str, Any]] = field(default_factory=list)
@@ -85,10 +86,13 @@ class ChatClient:
         authorized = dict(request)
         authorized.update(begun.get("request", begun))
         result = self._request(self.service_url, f"v1/actions/{action_id}/execute", payload=authorized)
-        state.session_version = result.get("session_version", result.get("receipt", {}).get("session_version", state.session_version + 1))
+        receipt = result.get("receipt")
+        receipt_ver = receipt.get("session_version") if isinstance(receipt, dict) else None
+        state.session_version = result.get("session_version") or receipt_ver or (state.session_version + 1)
         payload = result.get("result", result)
         state.draft = payload.get("outline") or payload.get("memory", {}).get("outline") or state.draft
         state.guidance = payload.get("guidance") or payload.get("memory", {}).get("guidance") or state.guidance
+        state.requirements = payload.get("requirements") or payload.get("memory", {}).get("requirements") or state.requirements
         state.answer = payload.get("answer", "")
         state.content = result.get("content")
         state.artifacts = result.get("files", [])
@@ -96,3 +100,23 @@ class ChatClient:
 
     def artifact(self, file_id: str) -> bytes:
         return self._request(self.bff_url, f"dev/artifacts/{file_id}", method="GET")
+
+    def list_skills(self) -> list[dict[str, Any]]:
+        try:
+            res = self._request(self.service_url, "v1/skills", method="GET")
+            if isinstance(res, dict) and "skills" in res:
+                return res["skills"]
+            if isinstance(res, list):
+                return res
+            return []
+        except Exception:
+            return []
+
+    def reload_skills(self) -> list[dict[str, Any]]:
+        try:
+            res = self._request(self.service_url, "v1/skills/reload", method="POST", payload={})
+            if isinstance(res, dict) and "skills" in res:
+                return res["skills"]
+            return []
+        except Exception:
+            return []

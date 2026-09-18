@@ -195,6 +195,21 @@ def create_app(
             lines.extend([f"# TYPE {metric} gauge", f"{metric} {value}"])
         return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
+    @app.get("/v1/skills")
+    async def list_skills(request: Request):
+        active_runtime: ExecutionRuntime = request.app.state.runtime
+        if hasattr(active_runtime.engine, "skills") and hasattr(active_runtime.engine.skills, "list_skills"):
+            return JSONResponse(jsonable_encoder({"skills": active_runtime.engine.skills.list_skills()}))
+        return JSONResponse({"skills": []})
+
+    @app.post("/v1/skills/reload")
+    async def reload_skills(request: Request):
+        active_runtime: ExecutionRuntime = request.app.state.runtime
+        if hasattr(active_runtime.engine, "skills") and hasattr(active_runtime.engine.skills, "reload"):
+            refreshed = active_runtime.engine.skills.reload()
+            return JSONResponse(jsonable_encoder({"skills": refreshed, "reloaded": True}))
+        return JSONResponse({"skills": [], "reloaded": False})
+
     @app.post("/v1/actions/{action_id}/execute")
     async def execute(action_id: str, request: Request, body: ExecuteRequest):
         if action_id != body.action_id:

@@ -35,6 +35,12 @@ class Engine:
         graph.add_edge("author", END)
         self.graph = graph.compile(checkpointer=self.saver)
 
+    def list_skills(self):
+        return self.skills.list_skills()
+
+    def reload_skills(self):
+        return self.skills.reload()
+
     async def _author(self, state: GraphState, runtime: Runtime[Turn]):
         turn = runtime.context
         turn.work = await execute(turn.request, Memory.model_validate(state["memory"]),

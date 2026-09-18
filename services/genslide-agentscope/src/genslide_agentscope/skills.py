@@ -49,31 +49,51 @@ def _markdown_skill(raw):
         raise ValueError("skill metadata values must be strings")
     body = "\n".join(lines[end + 1:]).strip()
     return {
-        "skill_id": data["name"], "version": metadata.get("version", "1"),
+        "skill_id": data["name"],
+        "version": metadata.get("version", "1"),
         "target_kind": metadata.get("target_kind"),
+        "description": data["description"],
         "instructions": {stage: body for stage in ("clarify", "outline", "generate")},
     }
 
 
 class SkillRegistry:
     def __init__(self, root: Path | None = None):
+        self._custom_root = Path(root) if root is not None else None
+        self.skills = {}
+        self.reload()
+
+    def reload(self):
+        """Dynamic reload of skills from disk without server restart."""
         configured = os.environ.get("GENSLIDE_SKILLS_DIR")
-        root = Path(root) if root is not None else (
-            Path(configured) if configured is not None else files(__package__).joinpath("skills")
-        )
-        if not root.is_dir():
-            raise ValueError("skill directory does not exist")
+        roots: list[Path] = []
+        if self._custom_root is not None:
+            roots = [self._custom_root]
+        elif configured is not None:
+            roots = [Path(configured)]
+        else:
+            roots = [Path(files(__package__).joinpath("skills"))]
+            # Also discover shared root-level skills directory if present
+            workspace_skills = Path.cwd() / "skills"
+            if workspace_skills.is_dir() and workspace_skills.resolve() != roots[0].resolve():
+                roots.append(workspace_skills)
+
         entries = []
-        for child in sorted(root.iterdir(), key=lambda p: p.name):
-            if hasattr(child, "is_symlink") and child.is_symlink():
-                raise ValueError("skill directory entries must not be symlinks")
-            if child.is_dir():
-                entry = child.joinpath("SKILL.md")
-                if (hasattr(entry, "is_symlink") and entry.is_symlink()) or entry.is_file():
-                    entries.append(entry)
+        for root in roots:
+            if not root.is_dir():
+                raise ValueError("skill directory does not exist")
+            for child in sorted(root.iterdir(), key=lambda p: p.name):
+                if hasattr(child, "is_symlink") and child.is_symlink():
+                    raise ValueError("skill directory entries must not be symlinks")
+                if child.is_dir():
+                    entry = child.joinpath("SKILL.md")
+                    if (hasattr(entry, "is_symlink") and entry.is_symlink()) or entry.is_file():
+                        entries.append(entry)
+
         if not entries or len(entries) > 128:
             raise ValueError("skill directory must contain 1 to 128 skills")
-        self.skills = {}
+
+        new_skills = {}
         for entry in entries:
             if (hasattr(entry, "is_symlink") and entry.is_symlink()) or not entry.is_file():
                 raise ValueError("skill entries must be regular files, not symlinks")
@@ -85,7 +105,7 @@ class SkillRegistry:
                 data = _markdown_skill(raw)
             except (ValueError, UnicodeError) as exc:
                 raise ValueError(f"invalid skill definition: {entry.name}") from exc
-            if not isinstance(data, dict) or set(data) != {"skill_id", "version", "target_kind", "instructions"}:
+            if not isinstance(data, dict) or set(data) != {"skill_id", "version", "target_kind", "instructions", "description"}:
                 raise ValueError("invalid skill fields")
             if any(not isinstance(data[k], str) or not _ID.fullmatch(data[k]) for k in ("skill_id", "version")):
                 raise ValueError("invalid skill identity or version")
@@ -95,12 +115,29 @@ class SkillRegistry:
             instructions = data["instructions"]
             if not isinstance(instructions, dict) or set(instructions) != {"clarify", "outline", "generate"}:
                 raise ValueError("invalid skill stages")
-            if any(not isinstance(v, str) or not v.strip() or len(v) > 4000 for v in instructions.values()):
+            if any(not isinstance(v, str) or not v.strip() or len(v) > 65536 for v in instructions.values()):
                 raise ValueError("invalid skill instructions")
-            if data["skill_id"] in self.skills:
+            if data["skill_id"] in new_skills:
                 raise ValueError("duplicate skill ID")
             data["hash"] = hashlib.sha256(raw).hexdigest()
-            self.skills[data["skill_id"]] = data
+            new_skills[data["skill_id"]] = data
+
+        self.skills = new_skills
+        return self.list_skills()
+
+    def list_skills(self) -> list[dict]:
+        """Return list of discovered skills and their metadata."""
+        return [
+            {
+                "skill_id": skill["skill_id"],
+                "name": skill["skill_id"],
+                "description": skill.get("description", ""),
+                "target_kind": skill.get("target_kind"),
+                "version": skill.get("version", "1"),
+                "hash": skill.get("hash", ""),
+            }
+            for skill in sorted(self.skills.values(), key=lambda s: s["skill_id"])
+        ]
 
     def get(self, kind, requested=None):
         selected = requested if requested is not None else kind

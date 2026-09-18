@@ -58,3 +58,24 @@ def test_upload_scopes_file_to_session_and_sanitizes_name():
     assert result == {"file_id": "uploaded"}
     assert b'name="session_id"' in request.data and b"session-1" in request.data
     assert b'filename="bad_name.docx"' in request.data
+
+
+def test_list_skills_and_reload_skills():
+    class Reply:
+        headers = type("H", (), {"get_content_type": lambda self: "application/json"})()
+        def __init__(self, data): self.data = data
+        def read(self): return json.dumps(self.data).encode()
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+
+    skills_payload = {"skills": [{"skill_id": "s1", "name": "Skill 1"}]}
+    with patch("frontend.service_chat_client.urlopen", return_value=Reply(skills_payload)):
+        client = ChatClient("http://bff", "http://service", "token")
+        skills = client.list_skills()
+        assert len(skills) == 1
+        assert skills[0]["skill_id"] == "s1"
+
+        reloaded = client.reload_skills()
+        assert len(reloaded) == 1
+        assert reloaded[0]["skill_id"] == "s1"
+

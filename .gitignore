@@ -22,3 +22,4 @@ __pycache__/
 tmp/
 gpt_models/
 .env*
+.log*

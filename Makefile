@@ -32,3 +32,12 @@ run:
 
 clean:
 	rm -rf .venv .pytest_cache __pycache__ */__pycache__ */*/__pycache__
+
+dev-agentscope:
+	./scripts/start_agentscope_dev.sh
+
+stop-agentscope:
+	./scripts/stop_agentscope_dev.sh
+
+test-flow:
+	$(UV) run ./scripts/test_agentscope_flow.py
