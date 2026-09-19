@@ -24,11 +24,11 @@ class Engine:
         memory = self.committed.get(key)
         return memory.model_copy(deep=True) if memory is not None else None
 
-    async def run(self, key, request, memory, materials):
+    async def run(self, key, request, memory, materials, progress=None):
         if self.turn_counts.get(key, 0) >= 32:
             raise ServiceError("CONTEXT_CAPACITY", 413)
         try:
-            return await execute(request, memory, materials, self.model, self.skills)
+            return await execute(request, memory, materials, self.model, self.skills, progress)
         except ValidationError as exc:
             raise ServiceError("MODEL_OUTPUT_INVALID", 502) from exc
 

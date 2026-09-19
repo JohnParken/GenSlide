@@ -1,9 +1,9 @@
-name: Phase-one independent services
+name: GenSlide CI
 on:
   push:
-    paths: ['services/**', 'tools/check_service_parity.py', '.github/workflows/phase1-services.yml']
+    paths: ['services/**', 'frontend/**', 'tests/**', 'scripts/**', 'pyproject.toml', 'uv.lock', '.github/workflows/phase1-services.yml']
   pull_request:
-    paths: ['services/**', 'tools/check_service_parity.py', '.github/workflows/phase1-services.yml']
+    paths: ['services/**', 'frontend/**', 'tests/**', 'scripts/**', 'pyproject.toml', 'uv.lock', '.github/workflows/phase1-services.yml']
 permissions:
   contents: read
 jobs:
@@ -24,11 +24,8 @@ jobs:
         working-directory: services/tl-proxy
       - run: npm test
         working-directory: services/tl-proxy
-  test:
+  agentscope:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        engine: [langgraph, agentscope]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -36,10 +33,18 @@ jobs:
           version: '0.10.2'
           python-version: '3.12'
       - run: uv sync --frozen
-        working-directory: services/genslide-${{ matrix.engine }}
+        working-directory: services/genslide-agentscope
       - run: uv run --locked pytest -q
-        working-directory: services/genslide-${{ matrix.engine }}
-      - run: uv run --locked python ../../tools/check_service_parity.py
-        working-directory: services/genslide-${{ matrix.engine }}
+        working-directory: services/genslide-agentscope
       - run: uv build
-        working-directory: services/genslide-${{ matrix.engine }}
+        working-directory: services/genslide-agentscope
+  workbench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.10.2'
+          python-version: '3.12'
+      - run: uv sync --frozen
+      - run: uv run pytest -q

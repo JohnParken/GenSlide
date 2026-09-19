@@ -100,7 +100,8 @@ class FakeEngine:
     async def read(self, key: str) -> Memory | None:
         return self.memories.get(key)
 
-    async def run(self, key: str, req: ExecuteRequest, memory: Memory, materials: str) -> WorkResult:
+    async def run(self, key: str, req: ExecuteRequest, memory: Memory, materials: str,
+                  progress=None) -> WorkResult:
         self.runs += 1
         self.started.set()
         if self.run_gate is not None:
@@ -331,7 +332,7 @@ async def test_cancelled_commit_ack_returns_committed_receipt() -> None:
 @pytest.mark.asyncio
 async def test_api_auth_validation_json_and_sse() -> None:
     bff, engine = FakeBFF(), FakeEngine()
-    app = create_app(settings=settings(max_request_bytes=512), bff=bff, engine=engine)
+    app = create_app(settings=settings(max_request_bytes=1024), bff=bff, engine=engine)
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -352,7 +353,7 @@ async def test_api_auth_validation_json_and_sse() -> None:
             assert all(f"event: {name}" in stream.text for name in ("accepted", "progress", "completed"))
 
             too_large = await client.post(
-                path, content=b"{" + b" " * 600,
+                path, content=b"{" + b" " * 1100,
                 headers=headers | {"Content-Type": "application/json"},
             )
             assert too_large.status_code == 413

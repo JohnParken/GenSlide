@@ -2,6 +2,7 @@ import json
 import httpx
 import pytest
 from genslide_agentscope.config import Settings
+from genslide_agentscope.domain import ServiceError
 from genslide_agentscope.model import Model
 from genslide_agentscope.tl_provider import TLProvider
 from genslide_agentscope.model import SDKTLModel
@@ -99,5 +100,47 @@ async def test_tl_protocol_through_framework_model_boundary(monkeypatch):
         assert [x[0] for x in seen] == ["/chatbbc/init_session", "/chatbbc/chat"]
         assert seen[1][1]["data"]["files"] == []
         assert seen[1][1]["data"]["stream"] is False
+    finally:
+        await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_gets_one_repair_attempt(monkeypatch):
+    _model_env(monkeypatch, provider="tl")
+    replies = ["not json at all", '{"answer":"repaired"}']
+    seen = []
+    async def handler(request):
+        body = json.loads(request.content)
+        seen.append((request.url.path, body))
+        if request.url.path.endswith("init_session"):
+            return httpx.Response(200, json={"code":0, "data":{"session_id":"test-session"}})
+        return httpx.Response(200, json={"code":0, "data":{"txt": replies.pop(0)}})
+    model = Model()
+    transport = model.tl_provider
+    await transport.client.aclose()
+    transport.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        assert await model.complete("Return JSON.", {"message":"hello"}) == {"answer":"repaired"}
+        chats = [body for path, body in seen if path.endswith("/chatbbc/chat")]
+        assert len(chats) == 2
+        assert "could not be parsed" in chats[1]["data"]["txt"]
+    finally:
+        await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_persistently_invalid_json_still_fails(monkeypatch):
+    _model_env(monkeypatch, provider="tl")
+    async def handler(request):
+        if request.url.path.endswith("init_session"):
+            return httpx.Response(200, json={"code":0, "data":{"session_id":"test-session"}})
+        return httpx.Response(200, json={"code":0, "data":{"txt": "still not json"}})
+    model = Model()
+    transport = model.tl_provider
+    await transport.client.aclose()
+    transport.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(ServiceError, match="MODEL_OUTPUT_INVALID"):
+            await model.complete("Return JSON.", {"message":"hello"})
     finally:
         await model.aclose()

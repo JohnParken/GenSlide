@@ -1,17 +1,17 @@
 # GenSlide AgentScope 一期 API
 
-独立安装、独立部署，不 import 根目录旧工程或另一服务包。
+独立安装、独立部署，不 import 根目录工作台代码。
 框架版本：`agentscope==2.0.7.post1`；推荐 Python 3.12（支持 3.11–3.12）。
 无 MySQL/TDSQL、Redis、Streamlit 或对象存储连接要求。
 
 ## 已实现的入口
 
 - `POST /v1/actions/{action_id}/execute`：一次请求完成操作；默认 JSON，`Accept: text/event-stream` 接收 SSE。
-- 六个操作：`clarify`、`create_outline`、`revise_outline`、`explain_outline`、`confirm_outline`、`generate`。
+- 七个操作：`clarify`、`create_outline`、`revise_outline`、`explain_outline`、`confirm_outline`、`generate`、`revise_content`。
 - 三种目标：`writing` 返回完整正文，`document` 生成可编辑 DOCX，`presentation` 生成 PPTX（封面、正文页、结束页）。
 - 逐步提问、建议选择、自由输入、大纲修订及明确确认。确认不调用模型；生成必须是确认后的新 action。
-- 仅本轮 TXT/Markdown/PDF/DOCX 附件；后续需要原材料须重新上传。本地跨轮只保存需求、引导状态和大纲，不保存正文或文件。
-- 内置三类只读 skill，只装配阶段指令，无 scripts、动态工具或任意代码执行。
+- 仅本轮 TXT/Markdown/PDF/DOCX 附件；后续需要原材料须重新上传。本地跨轮只保存需求、引导状态、大纲和正文哈希，不保存正文或文件；`revise_content` 由客户端回传当前草稿，并以 `content`、`expected_content_hash`、`section_titles` 指定范围。
+- 内置 5 个只读 skill（`document`、`presentation`、`writing`、`business-report`、`official-document-skill`），只装配阶段指令，无 scripts、动态工具或任意代码执行。
 
 ## 安装与启动
 
@@ -78,7 +78,7 @@ JSON skill 不再受支持，遗留 JSON 文件不会被注册；仅含 JSON 的
 目录至少 1 个、最多 128 个 skill；单文件最多 64 KiB，各阶段指令最多 4000 字符。
 正文用于当前 clarify/outline/generate 阶段，仅支持现有三类目标；不会加载 Python、scripts、
 用户上传文件或任意工具。目录是服务管理员管理的可信配置，不接受请求指定加载路径。
-两包使用同一批 skill 时，可分别部署相同目录副本；无需互相 import。
+多个 Pod 需要同一批 skill 时，各自部署相同目录副本即可，运行时之间无需互相 import。
 
 ### SKILL.md 格式（唯一支持格式）
 
@@ -116,7 +116,7 @@ description 用于描述，不触发自动选用；服务端阶段校验和输�
 精确请求 schema 见 `contracts/execute.schema.json` 与 `src/genslide_agentscope/domain.py`；线上 OpenAPI/Swagger 路由默认关闭。
 内部 HTTP 契约及解析见 `bff.py`，可运行参考见 `mock_bff.py`。
 BFF 必须先原子完成用户额度、会话版本、幂等及执行授权，再转发请求。
-相同幂等操作固定同一 action_id，且不得跨 engine 重试。
+相同幂等操作固定同一 action_id，不得改换目标实例重试。
 
 执行请求至少包含：
 `api_contract_version="1"`、`engine="agentscope"`、
@@ -155,7 +155,7 @@ SSE 包含 `accepted/progress/completed/error`、action_id 及 sequence。
 `GENSLIDE_SERVICE_TOKEN`（与 API 一致），运行：
 
 ```sh
-uv run --locked uvicorn genslide_agentscope.mock_bff:create_mock_bff --factory --host 127.0.0.1 --port 8001
+uv run --locked uvicorn genslide_agentscope.mock_bff:create_mock_bff --factory --host 127.0.0.1 --port 8010
 ```
 
 模拟 BFF 的 `POST /dev/begin` 接收完整执行请求（authorization 可先填占位值），返回
@@ -170,7 +170,7 @@ uv run --locked uvicorn genslide_agentscope.mock_bff:create_mock_bff --factory -
 - 默认每 Pod 两个生成槽、两个规划槽、两个 CPU 子进程和两个文件传输槽；满载快速拒绝，无后台任务队列。
 - 生成总上限 30 分钟，规划 180 秒；单次模型 HTTP 默认 120 秒；BFF 默认 10 秒，核对 5 秒。
 - 运行时空闲有效期由 BFF 决定（4 小时）；本地过期条目在后续准入时清理。
-- 默认最多 100 会话、单会话 32 KiB 白名单状态；两版均最多 32 次已提交操作/运行时，超过后显式重建，以限制 LangGraph 检查点历史增长。
+- 默认最多 100 会话、单会话 32 KiB 白名单状态；每个运行时最多 32 次已提交操作，超过后显式重建，以限制内存状态增长。
 - 附件单文件 20 MiB、本轮下载合计 64 MiB，PDF 最多 200 页，DOCX 解压体积 50 MiB；解析文本总上限 10 万字符。模型输入另设 60,000 UTF-8 字节上限，超限明确拒绝，不静默截断。
 - 解析/渲染在可终止子进程内进行；临时目录请求私有，请求结束清理。进程/Pod 被杀仍可能丢失内存草稿；BFF 已交接结果不受影响。
 - 失败操作可能使候选检查点所在会话失效；BFF 应提示重建，而非自动恢复生成。
@@ -179,8 +179,7 @@ uv run --locked uvicorn genslide_agentscope.mock_bff:create_mock_bff --factory -
 `Dockerfile` 是独立构建上下文；默认 Python 3.12 slim，可通过 BASE_IMAGE 替换为含
 `/usr/local/bin/python` 的企业批准镜像。openEuler 节点、CPU 架构、字体与目标 WPS
 必须在实际环境验证，不能以本机测试替代。容器以 UID/GID 10001 运行，不需要运行时 root。
-`deploy/kubernetes.yaml` 提供 headless Service＋StatefulSet 模板；两包各 2 副本，共 4 个 API Pod，
-无 Viewer。BFF 必须把运行时固定到具体 Pod DNS（如
+`deploy/kubernetes.yaml` 提供 headless Service＋StatefulSet 模板；默认 2 副本，无 Viewer。BFF 必须把运行时固定到具体 Pod DNS（如
 `genslide-agentscope-0.genslide-agentscope.<namespace>.svc:8000`），不能轮询 headless 地址。
 StatefulSet 固定名称不意味着内存持久化；该 Pod 重启后仍须重建运行时。
 模板中的镜像、Secret、网络隔离及探针需按实际平台配置，尚未部署到真实集群。

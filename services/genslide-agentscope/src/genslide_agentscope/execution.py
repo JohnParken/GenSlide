@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from .bff import BFF, Claim, CommitOutcome, FileReference, SettleOutcome
 from .config import Settings
-from .domain import Content, ExecuteRequest, Memory, ServiceError, WorkResult
+from .domain import GENERATION_OPERATIONS, Content, ExecuteRequest, Memory, ServiceError, WorkResult
 
 
 class Engine(Protocol):
@@ -224,7 +224,7 @@ class ExecutionRuntime:
         if request.engine != self.settings.engine_name or request.engine != self.engine.name:
             raise ServiceError("ENGINE_MISMATCH", 409)
         key = request.session_key()
-        bucket = "generation" if request.operation == "generate" else "planning"
+        bucket = "generation" if request.operation in GENERATION_OPERATIONS else "planning"
         await self._admit(key, bucket)
         instance_id = uuid4().hex
         try:
@@ -249,7 +249,7 @@ class ExecutionRuntime:
             now = _utcnow()
             operation_limit = (
                 self.settings.generation_timeout_seconds
-                if request.operation == "generate"
+                if request.operation in GENERATION_OPERATIONS
                 else self.settings.planning_timeout_seconds
             )
             local_deadline = now + timedelta(seconds=operation_limit)
@@ -415,8 +415,13 @@ class ExecutionRuntime:
 
         await self._emit_progress(execution, emit, "running_engine")
         execution.engine_started = True
+
+        async def progress(stage: str, fields: Mapping[str, Any] | None = None) -> None:
+            await self._emit_progress(execution, emit, stage, fields)
+
         try:
-            work = await self.engine.run(execution.key, request, execution.memory, materials)
+            work = await self.engine.run(execution.key, request, execution.memory, materials,
+                                         progress=progress)
             work = WorkResult.model_validate(work)
         except ServiceError:
             raise
@@ -427,7 +432,7 @@ class ExecutionRuntime:
         self._validate_work(execution, work)
 
         references: list[FileReference] = []
-        if request.operation == "generate" and request.target_kind in {"document", "presentation"}:
+        if request.operation in {"generate", "revise_content"} and request.target_kind in {"document", "presentation"}:
             await self._emit_progress(execution, emit, "rendering_artifact")
             assert work.content is not None
             rendered_path = await self._render(execution, work.content, workspace)
@@ -455,7 +460,7 @@ class ExecutionRuntime:
             raise ServiceError("CONTEXT_CAPACITY", 413)
         if "memory" in work.result:
             raise ServiceError("ENGINE_CONTRACT_ERROR", 502)
-        if request.operation == "generate":
+        if request.operation in {"generate", "revise_content"}:
             if work.content is None:
                 raise ServiceError("GENERATED_CONTENT_MISSING", 502)
         elif work.content is not None:
@@ -851,8 +856,14 @@ class ExecutionRuntime:
             return "client_disconnected"
         return "execution_failed"
 
-    async def _emit_progress(self, execution: PreparedExecution, emit: EventSink | None, stage: str) -> None:
-        await self._emit(execution, emit, "progress", {"stage": stage})
+    async def _emit_progress(
+        self,
+        execution: PreparedExecution,
+        emit: EventSink | None,
+        stage: str,
+        fields: Mapping[str, Any] | None = None,
+    ) -> None:
+        await self._emit(execution, emit, "progress", {"stage": stage, **(fields or {})})
 
     async def _emit(
         self,

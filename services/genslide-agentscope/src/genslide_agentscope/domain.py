@@ -5,8 +5,10 @@ import json
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
-Operation = Literal["clarify", "create_outline", "revise_outline", "explain_outline", "confirm_outline", "generate"]
+Operation = Literal["clarify", "create_outline", "revise_outline", "explain_outline", "confirm_outline", "generate", "revise_content"]
 Kind = Literal["writing", "document", "presentation"]
+#: Operations that produce or rewrite a full deliverable body (long deadline, generation slot).
+GENERATION_OPERATIONS = frozenset({"generate", "revise_content"})
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -18,7 +20,7 @@ class ServiceError(Exception):
 
 class ExecuteRequest(StrictModel):
     api_contract_version: Literal["1"] = "1"
-    engine: Literal["langgraph", "agentscope"]
+    engine: Literal["agentscope"]
     tenant_id: str = Field(min_length=1, max_length=128)
     user_id: str = Field(min_length=1, max_length=128)
     session_id: str = Field(min_length=1, max_length=128)
@@ -37,6 +39,11 @@ class ExecuteRequest(StrictModel):
     requirement_updates: dict[str, str] = Field(default_factory=dict)
     requires_materials: bool | None = None
     skill_id: str | None = None
+    # revise_content carries the current draft back so the pod stays stateless; the retained
+    # content hash proves the client is revising the revision the pod last produced.
+    content: Content | None = None
+    expected_content_hash: str | None = Field(default=None, max_length=128)
+    section_titles: list[str] = Field(default_factory=list, max_length=30)
 
     @model_validator(mode="after")
     def bounded_inputs(self):
@@ -49,6 +56,10 @@ class ExecuteRequest(StrictModel):
             raise ValueError("unknown requirement")
         if any(len(v) > 2000 for v in [*self.answers.values(), *self.requirement_updates.values()]):
             raise ValueError("input too long")
+        if any(not title or len(title) > 200 for title in self.section_titles):
+            raise ValueError("invalid section title")
+        if len(set(self.section_titles)) != len(self.section_titles):
+            raise ValueError("duplicate section title")
         return self
 
     def session_key(self) -> str:
@@ -100,6 +111,9 @@ class Memory(StrictModel):
     requirements: dict[str, str] = Field(default_factory=dict)
     guidance: Guidance = Field(default_factory=Guidance)
     outline: Outline | None = None
+    # Hash of the last generated body. Only the hash is retained; the body itself stays with
+    # the BFF so a finished draft cannot blow the local session memory budget.
+    content_hash: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
     def whitelist_requirements(self):
@@ -117,6 +131,10 @@ class Content(StrictModel):
     title: str = Field(min_length=1, max_length=200)
     sections: list[Section] = Field(min_length=1, max_length=30)
 
+
+# Content is declared after ExecuteRequest, so resolve that forward reference once here.
+ExecuteRequest.model_rebuild()
+
 class WorkResult(StrictModel):
     memory: Memory
     result: dict
@@ -130,3 +148,8 @@ def confirmation_hash(memory: Memory) -> str:
         raise ServiceError("OUTLINE_REQUIRED")
     return digest({"requirements": memory.requirements,
                    "outline": memory.outline.model_dump(exclude={"confirmed_hash"})})
+
+
+def content_hash(content: Content) -> str:
+    """Stable digest of a generated body; bound into memory after generate/revise_content."""
+    return digest(content.model_dump())

@@ -197,7 +197,7 @@ class AutonomousAgent:
         self.provider = os.getenv("MODEL_PROVIDER", "tl").strip().lower()
         self.base_url = os.getenv("MODEL_BASE_URL", "http://127.0.0.1:8089").strip()
         self.api_key = os.getenv("MODEL_API_KEY", "local-proxy-key").strip()
-        self.model_name = os.getenv("MODEL_NAME", "deepseek-v4-flash").strip()
+        self.model_name = os.getenv("MODEL_NAME", "deepseek-flash").strip()
         self.skills = SkillRegistry()
 
     def list_skills(self) -> list[dict[str, Any]]:

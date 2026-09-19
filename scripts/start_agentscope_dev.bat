@@ -17,7 +17,7 @@ set "GENSLIDE_BFF_URL=http://127.0.0.1:8010/internal/genslide/v1"
 set "MODEL_PROVIDER=tl"
 set "MODEL_BASE_URL=http://127.0.0.1:8089"
 set "MODEL_API_KEY=local-proxy-key"
-set "MODEL_NAME=deepseek-v4-flash"
+set "MODEL_NAME=deepseek-flash"
 
 if not exist "%REPO_ROOT%\.logs" mkdir "%REPO_ROOT%\.logs"
 

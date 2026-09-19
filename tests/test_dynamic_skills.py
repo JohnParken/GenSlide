@@ -1,4 +1,4 @@
-"""Tests for dynamic skill discovery, hot-reloading, and multi-engine parity."""
+"""Tests for dynamic skill discovery and hot-reloading."""
 import os
 import sys
 import tempfile
@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _AGENTSCOPE_SRC = _REPO_ROOT / "services" / "genslide-agentscope" / "src"
-_LANGGRAPH_SRC = _REPO_ROOT / "services" / "genslide-langgraph" / "src"
 _FRONTEND_DIR = _REPO_ROOT / "frontend"
 
 for p in [str(_AGENTSCOPE_SRC), str(_FRONTEND_DIR)]:

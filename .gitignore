@@ -21,5 +21,7 @@ __pycache__/
 # Project artifacts
 tmp/
 gpt_models/
+frontend/generated/
+dist/
 .env*
 .log*

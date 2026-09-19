@@ -69,9 +69,12 @@ async def test_model_cannot_change_generation_structure():
     work = await execute(req("create_outline", message="Guide"), Memory(), "", Model(outline()), skills)
     args = dict(draft_id=work.memory.outline.draft_id, expected_outline_version=1)
     work = await execute(req("confirm_outline", **args), work.memory, "", Model(), skills)
+    wrong = {"title":"Guide","sections":[{"title":"Changed","body":"body"}]}
+    # A structure miss is retried once per batch, so the model is asked twice before failing.
+    model = Model(wrong, wrong)
     with pytest.raises(ServiceError, match="GENERATED_STRUCTURE_MISMATCH"):
-        await execute(req("generate", **args), work.memory, "",
-                      Model({"title":"Guide","sections":[{"title":"Changed","body":"body"}]}), skills)
+        await execute(req("generate", **args), work.memory, "", model, skills)
+    assert len(model.calls) == 2
 
 def test_strict_request_and_memory_whitelist():
     with pytest.raises(ValidationError):

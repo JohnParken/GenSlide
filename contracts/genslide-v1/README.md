@@ -1,7 +1,7 @@
 # GenSlide 一期契约源
 
 `execute.schema.json` 是 `ExecuteRequest` 的 JSON Schema；两独立包保有副本，不在运行时依赖本目录。
-schema 或语义变更须同步两包并运行 `tools/check_service_parity.py` 和两包测试。
+schema 或语义变更须同步更新本契约与 `services/genslide-agentscope/contracts/execute.schema.json`，并运行该服务测试。
 
 BFF 编排顺序：稳定幂等键 → 原子准入与授权 → 固定 engine/Pod → 同步 execute → 查权威回执。
 claim 中的 `request_fingerprint` 为完整执行请求（按 Pydantic 默认值补全、排除 authorization）

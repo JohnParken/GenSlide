@@ -43,7 +43,7 @@ Example `.env` for DeepSeek:
 ```dotenv
 TL_PROXY_PORT=8090
 UPSTREAM_PROVIDER=deepseek
-UPSTREAM_MODEL=deepseek-v4-flash
+UPSTREAM_MODEL=deepseek-flash
 UPSTREAM_BASE_URL=https://api.deepseek.com
 UPSTREAM_API_KEY=sk-your-deepseek-api-key
 LOG_LEVEL=debug

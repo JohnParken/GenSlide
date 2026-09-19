@@ -16,7 +16,7 @@ $env:GENSLIDE_BFF_URL = "http://127.0.0.1:8010/internal/genslide/v1"
 $env:MODEL_PROVIDER = "tl"
 $env:MODEL_BASE_URL = "http://127.0.0.1:8089"
 $env:MODEL_API_KEY = "local-proxy-key"
-$env:MODEL_NAME = "deepseek-v4-flash"
+$env:MODEL_NAME = "deepseek-flash"
 
 function Test-PortListening {
     param([int]$Port)

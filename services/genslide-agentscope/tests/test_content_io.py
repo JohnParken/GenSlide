@@ -92,3 +92,30 @@ def test_render_rejects_invalid_kind_and_content(tmp_path: Path) -> None:
         render_content("presentation", {"title": "Plan", "sections": [{"title": "Long", "body": "x" * (MAX_SLIDE_BODY_CHARS + 1)}]}, tmp_path)
     with pytest.raises(ValueError, match="limit"):
         render_content("document", {"title": "x" * MAX_OUTPUT_CHARS, "sections": [{"title": "Valid", "body": "body"}]}, tmp_path)
+
+
+def test_render_document_splits_paragraphs_keeps_lists_and_strips_markdown(tmp_path: Path) -> None:
+    pytest.importorskip("docx")
+    from docx import Document
+
+    content = {"title": "Plan", "sections": [{"title": "Overview",
+               "body": "First paragraph.\n\nSecond paragraph with **bold** text.\n\n- Item one\n- Item two"}]}
+    document = Document(render_content("document", content, tmp_path))
+    assert [(p.text, p.style.name) for p in document.paragraphs if p.text] == [
+        ("Plan", "Title"),
+        ("Overview", "Heading 1"),
+        ("First paragraph.", "Normal"),
+        ("Second paragraph with bold text.", "Normal"),
+        ("Item one", "List Bullet"),
+        ("Item two", "List Bullet"),
+    ]
+    assert any(run.bold for run in document.paragraphs[3].runs)
+
+
+def test_render_document_excludes_speaker_notes(tmp_path: Path) -> None:
+    pytest.importorskip("docx")
+    from docx import Document
+
+    content = {"title": "Plan", "sections": [{"title": "Overview", "body": "Details", "notes": "Speak"}]}
+    document = Document(render_content("document", content, tmp_path))
+    assert "Speak" not in "\n".join(paragraph.text for paragraph in document.paragraphs)

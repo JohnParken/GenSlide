@@ -1,5 +1,10 @@
 # GenSlide 双框架纯同步多用户内容平台方案与分期实施计划
 
+> **历史归档（已取代）。** 本文描述的「LangGraph 与 AgentScope 两套独立服务并行交付」方案已不再执行：
+> `services/genslide-langgraph` 及其副本一致性检查 `tools/check_service_parity.py` 已从仓库移除，
+> AgentScope 是当前唯一引擎。文中涉及 LangGraph、双包对等交付、旧 Streamlit 工程的内容仅作为
+> 设计历史保留，请勿据此实现。现行结构见根目录 [README](../../README.md)。
+
 更新日期：2026-09-16
 
 状态：一期核心代码已实现，尚未完成真实 BFF/模型联调及生产环境验证。本文仍是完整目标方案，不能把全部验收项视为已通过；实际交付与限制见 [一期实现记录](phase1-implementation-status.md)。

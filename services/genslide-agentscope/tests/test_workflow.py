@@ -3,7 +3,7 @@ import pytest
 from genslide_agentscope.domain import ExecuteRequest, Memory, ServiceError
 from genslide_agentscope.engine import Engine
 from genslide_agentscope.skills import SkillRegistry
-from genslide_agentscope.workflow import execute
+from genslide_agentscope.workflow import execute, length_target
 
 
 class ScriptedModel:
@@ -98,3 +98,50 @@ async def test_engine_hides_pending_memory_until_publish_and_isolates_tenant_key
     await engine.delete(key)
     assert await engine.read(key) is None
     await engine.aclose()
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("约3000字", 3000), ("3000字", 3000), ("5000-8000字", 6500),
+    ("约1.5万字", 15000), ("1万字左右", 10000),
+    ("3页", None), ("中文", None), ("", None),
+])
+def test_length_requirement_parses_into_a_character_target(text, expected):
+    assert length_target({"length": text}) == expected
+
+
+@pytest.mark.asyncio
+async def test_length_requirement_sizes_outline_scale_and_generation_budget():
+    model = ScriptedModel(outline())
+    skills = SkillRegistry()
+    memory = Memory(requirements={"topic": "A useful guide", "length": "约3000字"})
+    created = await execute(request("create_outline"), memory, "", model, skills)
+    assert "roughly 3 sections" in model.calls[0][0]
+
+    confirmed = await execute(request("confirm_outline", draft_id=created.memory.outline.draft_id,
+                                      expected_outline_version=1), created.memory, "", ScriptedModel(), skills)
+    model.responses.append(generated())
+    await execute(request("generate", draft_id=created.memory.outline.draft_id,
+                          expected_outline_version=1), confirmed.memory, "", model, skills)
+    assert "Confirmed requirements are binding" in model.calls[1][0]
+    assert "about 1500 characters per section" in model.calls[1][0]
+
+
+@pytest.mark.asyncio
+async def test_model_provided_proposals_do_not_exhaust_the_inference_guard():
+    skills = SkillRegistry()
+    model = ScriptedModel({
+        "requirements": {"topic": "A useful guide", "language": "中文"},
+        "guidance": {"stage": "clarify", "proposals": [
+            {"proposal_id": "p1", "field": "purpose", "value": "v1"},
+            {"proposal_id": "p2", "field": "length", "value": "v2"},
+            {"proposal_id": "p3", "field": "constraints", "value": "v3"}]},
+        "answer": ""})
+    result = await execute(request("clarify"), Memory(), "", model, skills)
+    assert result.result["requirements"] == {"topic": "A useful guide"}
+    assert [p["field"] for p in result.result["guidance"]["proposals"]] == ["purpose", "length", "constraints"]
+
+    excessive = ScriptedModel({
+        "requirements": {"topic": "Guide", "audience": "a", "language": "b", "style": "c", "constraints": "d"},
+        "guidance": {"stage": "clarify", "proposals": []}, "answer": ""})
+    with pytest.raises(ServiceError, match="REQUIREMENTS_NEED_CONFIRMATION"):
+        await execute(request("clarify"), Memory(), "", excessive, skills)

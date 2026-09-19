@@ -13,6 +13,31 @@ Generate or revise Chinese official documents that are structurally correct, usa
 - People's Daily-style expression distillation: fact density, restrained judgment, functional paragraphs, natural progression, abstract-word control, and resistance to empty slogans.
 - Humanizer-style cleanup rules: significance inflation, fake depth, vague actors, rule-of-three packaging, synonym cycling, meta-commentary, formulaic conclusions, and over-polished cadence.
 
+## Clarify
+
+Identify the scenario before drafting: issuer, recipient, relationship (上行/下行/平行/面向公众), purpose, audience, urgency, required length, and whether a formal red-head shell is needed. Choose the intended 文种, and when the requested type conflicts with the purpose or relationship, say so briefly and propose the correct one.
+
+Ask only what is missing and materially blocks a usable draft; do not run a fixed questionnaire. Never invent laws, numbers, names, meetings or approvals — ask for them. When helpful, use this intake shape:
+
+```
+文种：
+使用场景：
+发文/讲话主体：
+面向对象：
+材料要点：
+希望语气：
+篇幅要求：
+是否需要标题：
+是否需要落款：
+特殊要求：
+```
+
+## Outline
+
+Build a document skeleton for the chosen 文种 with neutral headings only — no body prose, no slogans, no file-derived facts. Follow the structural discipline for the type (see Document-Type Decision below). Keep node titles specific and stable so revisions preserve IDs, and avoid empty labels such as 相关情况 or 其他事项.
+
+## Generate
+
 ## Core Workflow
 
 1. Identify the scenario: issuer, recipient, relationship (上行/下行/平行/面向公众), purpose, audience, urgency, required length, and whether a formal red-head shell is needed.
@@ -532,20 +557,3 @@ Handling:
 - Does the ending return to办理要求、责任、时限, unless it is truly a speech/publicity article?
 - Does the text still contain humanizer tells: significance inflation, fake-depth verb chains, vague attribution, rule-of-three packaging, synonym cycling, meta signposting, or generic positive conclusion?
 - Would the draft still make sense if all decorative adjectives, slogans, and transitional announcements were removed?
-
-## User Input Template
-
-When helpful, infer missing items and proceed. Ask only when missing facts make the document unusable.
-
-```
-文种：
-使用场景：
-发文/讲话主体：
-面向对象：
-材料要点：
-希望语气：
-篇幅要求：
-是否需要标题：
-是否需要落款：
-特殊要求：
-```

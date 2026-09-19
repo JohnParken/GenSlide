@@ -1,4 +1,61 @@
 {
+  "$defs": {
+    "Content": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/Section"
+          },
+          "maxItems": 30,
+          "minItems": 1,
+          "title": "Sections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title",
+        "sections"
+      ],
+      "title": "Content",
+      "type": "object"
+    },
+    "Section": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "body": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "body"
+      ],
+      "title": "Section",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
   "properties": {
     "api_contract_version": {
@@ -8,10 +65,7 @@
       "type": "string"
     },
     "engine": {
-      "enum": [
-        "langgraph",
-        "agentscope"
-      ],
+      "const": "agentscope",
       "title": "Engine",
       "type": "string"
     },
@@ -62,7 +116,8 @@
         "revise_outline",
         "explain_outline",
         "confirm_outline",
-        "generate"
+        "generate",
+        "revise_content"
       ],
       "title": "Operation",
       "type": "string"
@@ -162,6 +217,38 @@
       ],
       "default": null,
       "title": "Skill Id"
+    },
+    "content": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Content"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "expected_content_hash": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Content Hash"
+    },
+    "section_titles": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 30,
+      "title": "Section Titles",
+      "type": "array"
     }
   },
   "required": [
@@ -179,4 +266,3 @@
   "title": "ExecuteRequest",
   "type": "object"
 }
-

@@ -29,6 +29,63 @@ def _normalize(text: str) -> str:
     return "\n".join(cleaned).strip()
 
 
+_MD_BOLD = re.compile(r"\*\*(.+?)\*\*|__(.+?)__")
+_MD_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+_MD_BULLET = re.compile(r"^\s*[-*+•]\s+(.*)$")
+_MD_NUMBER = re.compile(r"^\s*\d+[.)、]\s+(.*)$")
+
+
+def _plain_markdown(text: str) -> str:
+    """Strip inline Markdown markers so raw syntax never reaches a delivered file."""
+    text = _MD_BOLD.sub(lambda match: match.group(1) or match.group(2), text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", r"\1", text)
+    return text
+
+
+def _write_markdown_runs(paragraph, text: str) -> None:
+    """Write inline text, turning **bold** / __bold__ into real bold runs."""
+    position = 0
+    for match in _MD_BOLD.finditer(text):
+        if match.start() > position:
+            paragraph.add_run(_plain_markdown(text[position:match.start()]))
+        paragraph.add_run(match.group(1) or match.group(2)).bold = True
+        position = match.end()
+    if position < len(text):
+        paragraph.add_run(_plain_markdown(text[position:]))
+
+
+def write_markdown_body(document, body: str) -> None:
+    """Render a section body into Word headings, list paragraphs and prose paragraphs.
+
+    Blank lines separate paragraphs; list markers become real Word list styles; inline
+    bold becomes a bold run. A body without any of these renders as a single paragraph
+    whose text is unchanged.
+    """
+    for block in re.split(r"\n\s*\n", body.strip()):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if not lines:
+            continue
+        heading = _MD_HEADING.match(lines[0])
+        if heading:
+            document.add_heading(_plain_markdown(heading.group(2)).strip(), level=min(len(heading.group(1)) + 1, 4))
+            lines = lines[1:]
+            if not lines:
+                continue
+        if _MD_BULLET.match(lines[0]) or _MD_NUMBER.match(lines[0]):
+            for line in lines:
+                bullet, number = _MD_BULLET.match(line), _MD_NUMBER.match(line)
+                marker = bullet or number
+                style = "List Bullet" if bullet else "List Number"
+                _write_markdown_runs(document.add_paragraph(style=style), marker.group(1).strip())
+            continue
+        paragraph = document.add_paragraph()
+        for index, line in enumerate(lines):
+            if index:
+                paragraph.add_run().add_break()
+            _write_markdown_runs(paragraph, line)
+
+
 def parse_attachment(path: Path) -> str:
     """Extract normalized text from a supported attachment within size limits."""
     if not isinstance(path, Path):
@@ -150,9 +207,8 @@ def render_content(kind: str, content: dict, directory: Path) -> Path:
         for section in sections:
             document.add_heading(section["title"], level=1)
             if section["body"]:
-                document.add_paragraph(section["body"])
-            if section["notes"]:
-                document.add_paragraph(section["notes"], style="Caption")
+                write_markdown_body(document, section["body"])
+            # Speaker notes are presentation-only; they must not leak into a Word deliverable.
         document.save(output)
         return output
 
@@ -205,7 +261,7 @@ def render_content(kind: str, content: dict, directory: Path) -> Path:
         return box
 
     def set_para(para, text, size=12, color=C_TEXT_DARK, bold=False, align=None, font_name="Microsoft YaHei"):
-        para.text = text
+        para.text = _plain_markdown(text)
         para.font.size = Pt(size)
         para.font.color.rgb = color
         para.font.bold = bold
@@ -363,7 +419,7 @@ def render_content(kind: str, content: dict, directory: Path) -> Path:
         set_para(b_foot_r.text_frame.paragraphs[0], f"{sec_idx:02d} / {total_sections:02d}", 9.5, C_TEXT_FAINT, align=PP_ALIGN.RIGHT)
 
         if section.get("notes"):
-            slide.notes_slide.notes_text_frame.text = section["notes"]
+            slide.notes_slide.notes_text_frame.text = _plain_markdown(section["notes"])
 
     # 3. 封底页 (Closing Slide)
     closing = presentation.slides.add_slide(blank)

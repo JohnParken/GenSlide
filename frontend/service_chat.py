@@ -122,8 +122,8 @@ with st.sidebar:
         bff = st.text_input("BFF URL", "http://localhost:8010")
         default_token = os.getenv("GENSLIDE_SERVICE_TOKEN", "local-development-token-at-least-32-characters")
         token = st.text_input("Token", value=default_token, type="password")
-        engine = st.selectbox("Engine", ["agentscope", "langgraph"], index=0)
-        default_urls = {"langgraph": "http://localhost:8001", "agentscope": "http://localhost:8002"}
+        engine = "agentscope"
+        default_urls = {"agentscope": "http://localhost:8002"}
         service = st.text_input(f"{engine} URL", default_urls[engine])
         client = ChatClient(bff, service, token, engine=engine)
 

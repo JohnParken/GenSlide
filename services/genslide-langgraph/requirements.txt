@@ -1,4 +1,0 @@
-# Compatibility installation entry. For reproducible production use uv sync --frozen.
-# Run from this package directory; Python >=3.11,<3.13.
-langgraph==0.6.11
--e .

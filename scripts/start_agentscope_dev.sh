@@ -16,7 +16,7 @@ export GENSLIDE_BFF_URL=http://127.0.0.1:8010/internal/genslide/v1
 export MODEL_PROVIDER=tl
 export MODEL_BASE_URL=http://127.0.0.1:8089
 export MODEL_API_KEY=local-proxy-key
-export MODEL_NAME=deepseek-v4-flash
+export MODEL_NAME=deepseek-flash
 
 LOG_DIR="$REPO_ROOT/.logs"
 mkdir -p "$LOG_DIR"

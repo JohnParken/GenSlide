@@ -1,10 +1,15 @@
 # 一期实现记录与上线前清单
 
+> **历史归档（已取代）。** 本文记录的 LangGraph 服务、双包对等测试与副本一致性检查已随
+> `services/genslide-langgraph`、`tools/check_service_parity.py` 一并移除。当前仅保留
+> AgentScope 服务；下列交付入口中 LangGraph 一项已失效，其余仍然有效。现行结构见根目录
+> [README](../../README.md)。
+
 日期：2026-09-16。状态：**核心功能代码与本地验证已完成，可开始 BFF 联调；尚未完成生产上线验收。**
 
 ## 交付入口
 
-- [LangGraph 独立服务](../../services/genslide-langgraph/README.md)：固定 LangGraph 0.6.11。
+- ~~LangGraph 独立服务：固定 LangGraph 0.6.11。~~（已移除）
 - [AgentScope 独立服务](../../services/genslide-agentscope/README.md)：固定 AgentScope 2.0.7.post1。
 - [TL 测试代理](../../services/tl-proxy/README.md)：chatbbc 两段式协议转换和公网模型联调。
 - [BFF 契约源](../../contracts/genslide-v1/README.md) 与两包各自的请求 JSON Schema。

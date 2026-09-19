@@ -26,6 +26,8 @@ base URL 与 key 的地域要匹配，使用控制台给出的实际 endpoint；
 
 截至 2026-09-13，DeepSeek 官方文档示例使用 `deepseek-v4-flash` / `deepseek-v4-pro`；这只是可配置示例，不替用户决定账号路由。官方 V4 的 `thinking` 使用 `{"type":"enabled"}` / `{"type":"disabled"}`，默认不发送该字段即可沿用服务端默认。第三方托管 DeepSeek 的参数按其实际 endpoint 契约另建 profile，不能照搬官方映射。
 
+> 2026-09-18 实测 `GET https://api.deepseek.com/models` 仅返回 `deepseek-flash` 与 `deepseek-v4-pro`，`deepseek-v4-flash` 已不可用。配置以账号实际返回为准。
+
 旧 DsProxy 的 JSON 提示注入、name 选模型和角色文本解析不作为统一门面的默认行为。即使 provider 支持 JSON Output/原生工具，这个模拟器也不默认启用；输出格式靠提示词，工具含义由客户端处理。
 
 ## 联调记录
@@ -55,7 +57,7 @@ LOG_LEVEL=debug
 # DeepSeek 官方示例实例：QwenPaw TL endpoint 指向 http://127.0.0.1:8090
 TL_PROXY_PORT=8090
 UPSTREAM_PROVIDER=deepseek
-UPSTREAM_MODEL=deepseek-v4-flash
+UPSTREAM_MODEL=deepseek-flash
 UPSTREAM_BASE_URL=https://api.deepseek.com
 UPSTREAM_API_KEY=<从本机环境注入>
 UPSTREAM_THINKING=provider-default

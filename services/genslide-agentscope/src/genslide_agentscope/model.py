@@ -8,6 +8,10 @@ from .tl_provider import TLProvider
 
 MAX_INPUT_BYTES = 60000
 MAX_OUTPUT_BYTES = 160000
+REPAIR_INSTRUCTION = (
+    "\n\nYour previous reply could not be parsed. Reply again with ONLY one JSON object that "
+    "validates against the schema above: no markdown fences, no prose, no reasoning, no trailing text."
+)
 
 def encode_payload(payload):
     encoded = json.dumps(payload, ensure_ascii=False)
@@ -64,6 +68,9 @@ class SDKTLModel(ChatModelBase):
         return ChatResponse(content=[TextBlock(text=text)], is_last=True)
 
 class Model:
+    #: Model input budget for one request payload; workflow uses it to size materials.
+    max_input_bytes = MAX_INPUT_BYTES
+
     def __init__(self):
         base, key, name = model_settings()
         self.provider_name = model_provider_from_env()
@@ -81,6 +88,25 @@ class Model:
 
     async def complete(self, system, payload):
         encoded = encode_payload(payload)
+        try:
+            raw = await self._reply(system, encoded)
+            try:
+                return decode_output(raw)
+            except ServiceError as exc:
+                if exc.code != "MODEL_OUTPUT_INVALID":
+                    raise
+                # One repair round: only the JSON boundary was broken, so restate it and accept a
+                # second attempt instead of failing the whole action.
+                raw = await self._reply(system, encoded + REPAIR_INSTRUCTION)
+                return decode_output(raw)
+        except asyncio.CancelledError:
+            raise
+        except ServiceError:
+            raise
+        except Exception as exc:
+            raise ServiceError("MODEL_UNAVAILABLE", 502) from exc
+
+    async def _reply(self, system, text):
         # Agent, state and empty toolkit are request-private. No default workspace,
         # scripts, offloading, memory plugin, task tools or background service.
         agent = Agent(
@@ -90,18 +116,11 @@ class Model:
             react_config=ReActConfig(max_iters=1, interruption_raise_cancelled_error=True),
             injection_config=InjectionConfig(inject_runtime_state=False),
         )
-        try:
-            reply = await agent.reply(Msg(name="user", role="user",
-                                          content=[{"type": "text", "text": encoded}]))
-            if asyncio.current_task().cancelling():
-                raise asyncio.CancelledError()
-            return decode_output(reply.get_text_content())
-        except asyncio.CancelledError:
-            raise
-        except ServiceError:
-            raise
-        except Exception as exc:
-            raise ServiceError("MODEL_UNAVAILABLE", 502) from exc
+        reply = await agent.reply(Msg(name="user", role="user",
+                                      content=[{"type": "text", "text": text}]))
+        if asyncio.current_task().cancelling():
+            raise asyncio.CancelledError()
+        return reply.get_text_content()
 
     async def aclose(self):
         tl_provider = getattr(self, "tl_provider", None)

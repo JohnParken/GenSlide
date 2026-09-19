@@ -49,7 +49,7 @@ export function loadConfigFromEnv(env: Record<string, string | undefined> = proc
   const host = env.TL_PROXY_HOST || "127.0.0.1";
   const port = parseNumber(env.TL_PROXY_PORT, 8089);
   const upstreamProvider = (env.UPSTREAM_PROVIDER || "qwen").toLowerCase();
-  const upstreamModel = env.UPSTREAM_MODEL || (upstreamProvider === "qwen" ? "qwen3.8-flash" : "deepseek-v4-flash");
+  const upstreamModel = env.UPSTREAM_MODEL || (upstreamProvider === "qwen" ? "qwen3.8-flash" : "deepseek-flash");
   const upstreamBaseUrl = (env.UPSTREAM_BASE_URL || "").trim();
   const upstreamApiKey = (env.UPSTREAM_API_KEY || "").trim();
   const systemPromptVariableName = (env.SYSTEM_PROMPT_VARIABLE_NAME || "system_prompt").trim();

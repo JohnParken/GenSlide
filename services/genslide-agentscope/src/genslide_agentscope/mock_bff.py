@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import Response
-from .domain import ExecuteRequest, digest
+from .domain import GENERATION_OPERATIONS, ExecuteRequest, digest
 
 PREFIX = "/internal/genslide/v1"
 MAX_BYTES = 20 * 1024 * 1024
@@ -101,7 +101,7 @@ def create_mock_bff():
         # Keep the validated body; initial authorization is held separately.
         actions[body.action_id] = {"request": body, "fingerprint": fingerprint,
             "authorization": authorization, "status": "authorized",
-            "deadline": time.time() + (1800 if body.operation == "generate" else 180)}
+            "deadline": time.time() + (1800 if body.operation in GENERATION_OPERATIONS else 180)}
         return {"request": body.model_dump(mode="json", exclude={"authorization"}) |
                 {"authorization": authorization}, "status": "authorized", "action_id": body.action_id}
 
@@ -158,7 +158,7 @@ def create_mock_bff():
             file = files.get(ref.get("file_id"))
             if not file or file.get("action_id") != action_id:
                 raise HTTPException(409, "FILE_NOT_UPLOADED")
-        if req.operation == "generate" and req.target_kind != "writing" and not body.get("files"):
+        if req.operation in GENERATION_OPERATIONS and req.target_kind != "writing" and not body.get("files"):
             raise HTTPException(409, "FILE_REQUIRED")
         # Atomic within this event loop: no await between validation and commit.
         session["version"] += 1

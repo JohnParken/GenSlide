@@ -22,6 +22,47 @@ class _MetadataLoader(yaml.SafeLoader):
         return result
 
 
+_STAGE_HEADINGS = {"clarify": "clarify", "outline": "outline", "generate": "generate"}
+# No trailing $: a block holds the heading plus its body, so the match must stop at the
+# first line rather than requiring the heading to be the whole block.
+_H2 = re.compile(r"^##\s+(.*)")
+
+
+def _blocks(body: str) -> list[str]:
+    """Split a body into one block per `## ` heading, preserving everything else."""
+    blocks: list[str] = []
+    for line in body.splitlines():
+        if line.startswith("## ") or not blocks:
+            blocks.append(line)
+        else:
+            blocks[-1] = f"{blocks[-1]}\n{line}"
+    return [block for block in blocks if block.strip()]
+
+
+def _stage_instructions(body: str) -> dict[str, str]:
+    """Split a skill body into per-stage guidance so no stage carries the whole manual.
+
+    A `## Clarify` / `## Outline` / `## Generate` heading starts that stage; later headings
+    that are not stage names belong to the stage they follow. Text before the first stage
+    heading is shared and prefixed to every stage, so a body without stage headings behaves
+    exactly as before and is sent unchanged to all three stages.
+    """
+    sections: dict[str, list[str]] = {stage: [] for stage in _STAGE_HEADINGS.values()}
+    shared: list[str] = []
+    current: str | None = None
+    for block in _blocks(body):
+        heading = _H2.match(block)
+        stage = _STAGE_HEADINGS.get(heading.group(1).strip().lower()) if heading else None
+        if stage is not None:
+            current = stage
+        (sections[current] if current is not None else shared).append(block)
+    preamble = "\n\n".join(shared).strip()
+    return {
+        stage: "\n\n".join(part for part in (preamble, *sections[stage]) if part).strip()
+        for stage in sections
+    }
+
+
 def _markdown_skill(raw):
     try:
         lines = raw.decode("utf-8-sig").splitlines()
@@ -53,7 +94,7 @@ def _markdown_skill(raw):
         "version": metadata.get("version", "1"),
         "target_kind": metadata.get("target_kind"),
         "description": data["description"],
-        "instructions": {stage: body for stage in ("clarify", "outline", "generate")},
+        "instructions": _stage_instructions(body),
     }
 
 

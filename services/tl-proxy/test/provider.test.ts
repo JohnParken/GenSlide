@@ -60,7 +60,7 @@ test("Provider Adapters & Thinking Mapping", async (t) => {
     // 1. Thinking enabled
     const configEnabled = loadConfigFromEnv({
       UPSTREAM_PROVIDER: "deepseek",
-      UPSTREAM_MODEL: "deepseek-v4-flash",
+      UPSTREAM_MODEL: "deepseek-flash",
       UPSTREAM_BASE_URL: upstreamUrl,
       UPSTREAM_API_KEY: "test-ds-key",
       UPSTREAM_THINKING: "enabled",
@@ -76,12 +76,12 @@ test("Provider Adapters & Thinking Mapping", async (t) => {
 
     let lastReq = upstream.recordedRequests.slice(-1)[0];
     assert.deepEqual(lastReq.body.thinking, { type: "enabled" });
-    assert.equal(lastReq.body.model, "deepseek-v4-flash");
+    assert.equal(lastReq.body.model, "deepseek-flash");
 
     // 2. Thinking disabled
     const configDisabled = loadConfigFromEnv({
       UPSTREAM_PROVIDER: "deepseek",
-      UPSTREAM_MODEL: "deepseek-v4-flash",
+      UPSTREAM_MODEL: "deepseek-flash",
       UPSTREAM_BASE_URL: upstreamUrl,
       UPSTREAM_API_KEY: "test-ds-key",
       UPSTREAM_THINKING: "disabled",
