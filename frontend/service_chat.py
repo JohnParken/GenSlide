@@ -1,7 +1,7 @@
 """GenSlide AI Writing Studio - Apple-inspired Workbench with Expert Advisory Council.
 
 Features:
-1. Creative Exploration Mode (自由探索模式) with 3-5 follow-up questions & clickable option chips;
+1. Creative Exploration Mode with persistent context and optional focused questions;
 2. Professional Workflow Mode (专业模式) with model-driven intelligent state transitions;
 3. WorkBuddy-style Expert Advisory Council (专家团) with vivid personas and specialized guidance;
 4. Apple-grade frosted glass aesthetics and live artifact inspector.
@@ -9,19 +9,33 @@ Features:
 from __future__ import annotations
 
 import io
+import hashlib
+import json
 import os
+import uuid
+from copy import deepcopy
 from pathlib import Path
+import uuid
 from zipfile import BadZipFile, ZipFile
 import streamlit as st
 
 try:
-    from .service_chat_client import ChatClient, ChatClientError, ChatState
-    from .autonomous_agent import AutonomousAgent, detect_target_kind, route_professional_intent
-    from .expert_council import get_expert, list_all_experts, ExpertProfile
+    from frontend.service_chat_client import ChatClient, ChatClientError, ChatState
+    from frontend.autonomous_agent import AutonomousAgent, detect_target_kind, route_professional_intent
+    from frontend.expert_council import get_expert, list_all_experts, ExpertProfile
+    from frontend.chat_context import read_attachment_bytes
+    from frontend.chat_session import load_session, save_session
 except ImportError:  # streamlit run frontend/service_chat.py
     from service_chat_client import ChatClient, ChatClientError, ChatState
     from autonomous_agent import AutonomousAgent, detect_target_kind, route_professional_intent
     from expert_council import get_expert, list_all_experts, ExpertProfile
+    from chat_context import read_attachment_bytes
+    from chat_session import load_session, save_session
+
+def rerun_workbench():
+    save_session(st.session_state)
+    st.rerun()
+
 
 st.set_page_config(
     page_title="GenSlide · AI 写作工作台",
@@ -90,103 +104,187 @@ def validate_attachment(filename: str, content: bytes) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
-# 侧边栏：工作台设置与 WorkBuddy 专家团
+# 网关与客户端初始化（默认无感开箱即用，支持通过耳机🎧控制台随时热调整）
+# ---------------------------------------------------------------------------
+default_bff = os.getenv("GENSLIDE_BFF_URL", "http://localhost:8010")
+default_token = os.getenv("GENSLIDE_SERVICE_TOKEN", "local-development-token-at-least-32-characters")
+default_engine = os.getenv("GENSLIDE_ENGINE", "agentscope")
+default_service = os.getenv("GENSLIDE_SERVICE_URL", "http://localhost:8002")
+
+if "bff_url" not in st.session_state:
+    st.session_state.bff_url = default_bff
+if "bff_token" not in st.session_state:
+    st.session_state.bff_token = default_token
+if "service_url" not in st.session_state:
+    st.session_state.service_url = default_service
+if "engine" not in st.session_state:
+    st.session_state.engine = default_engine
+
+client = ChatClient(
+    st.session_state.bff_url,
+    st.session_state.service_url,
+    st.session_state.bff_token,
+    engine=st.session_state.engine,
+)
+bff = st.session_state.bff_url
+token = st.session_state.bff_token
+service = st.session_state.service_url
+engine = st.session_state.engine
+
+# ---------------------------------------------------------------------------
+# 全局多会话管理 (Multi-Session Storage in session_state)
+# ---------------------------------------------------------------------------
+if "sessions_store" not in st.session_state:
+    # 默认新建首个会话
+    first_sid = uuid.uuid4().hex[:8]
+    st.session_state.sessions_store = {
+        first_sid: {
+            "title": "新创作对话",
+            "created_at": "刚刚",
+            "chat_state": ChatState(engine=engine),
+            "messages": [],
+            "downloads": [],
+            "current_attachment": None,
+            "active_follow_ups": [],
+            "uploader_key": 0,
+        }
+    }
+    st.session_state.current_session_id = first_sid
+
+if "current_session_id" not in st.session_state or st.session_state.current_session_id not in st.session_state.sessions_store:
+    st.session_state.current_session_id = next(iter(st.session_state.sessions_store.keys()))
+
+# 写作工作台抽屉/分栏展开开关（默认展开工作台，点击可切换三栏或收拢）
+if "show_workbench" not in st.session_state:
+    st.session_state.show_workbench = True
+
+# ---------------------------------------------------------------------------
+# 侧边栏：用户会话栏 (User Sessions Sidebar)
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### ⚙️ 工作台设置")
+    col_new_btn, col_refresh_btn = st.columns([4, 1])
+    with col_new_btn:
+        if st.button("➕ 新建会话", use_container_width=True, type="primary"):
+            new_sid = uuid.uuid4().hex[:8]
+            st.session_state.sessions_store[new_sid] = {
+                "title": f"新会话 {len(st.session_state.sessions_store) + 1}",
+                "created_at": "刚刚",
+                "chat_state": ChatState(engine=engine),
+                "messages": [],
+                "downloads": [],
+                "current_attachment": None,
+                "active_follow_ups": [],
+                "uploader_key": 0,
+            }
+            st.session_state.current_session_id = new_sid
+            rerun_workbench()
 
-    # 视觉主题选择器：默认启用 Apple Studio Light（浅色纸质质感）
-    ui_theme = st.radio(
-        "🎨 视觉主题 (Theme)",
-        ["☀️ 经典浅色 (Apple Studio Light)", "🌙 暗黑深邃 (Dark Studio)"],
-        index=0,
-        help="☀️ 经典浅色：明亮清爽纸质质感，右侧看板纯白卡片（默认）；🌙 暗黑深邃：暗黑模式。",
-    )
-    is_dark = ui_theme.startswith("🌙")
-
-    interaction_mode = st.radio(
-        "工作台模式 (Mode)",
-        ["🌟 自由探索模式 (Creative Exploration)", "📐 专业模式 (Professional Workflow)"],
-        index=0,
-        help=(
-            "🌟 自由探索模式：大模型完全自主规划并调用专家技能，支持一句话直出、智能追问与选项快速点击；\n"
-            "📐 专业模式：严格刚性状态机控制（需求澄清->制定大纲->显式确认->生成正文），支持自然语言意图智能流转。"
-        ),
-    )
-    is_autonomous = interaction_mode.startswith("🌟")
-
-    st.divider()
-
-    # 1. 服务网关配置
-    with st.expander("🔧 服务网关与通信设置", expanded=False):
-        bff = st.text_input("BFF URL", "http://localhost:8010")
-        default_token = os.getenv("GENSLIDE_SERVICE_TOKEN", "local-development-token-at-least-32-characters")
-        token = st.text_input("Token", value=default_token, type="password")
-        engine = "agentscope"
-        default_urls = {"agentscope": "http://localhost:8002"}
-        service = st.text_input(f"{engine} URL", default_urls[engine])
-        client = ChatClient(bff, service, token, engine=engine)
-
-    client = ChatClient(bff, service, token, engine=engine)
-
-    # 2. 默认目标交付形态
-    target = st.selectbox(
-        "默认交付形态 (Target)",
-        ["document", "presentation", "writing"],
-        index=0,
-        help="document: 生成可编辑 Word/WPS 文档（默认标准交付形态）；presentation: 仅在明确要制作PPT时生成 PPTX；writing: 生成纯正文。",
-    )
-
-    st.divider()
-
-    # 3. WorkBuddy 专家团顾问席位 (Expert Advisory Council)
-    st.markdown("### 👥 专家顾问团 (Expert Council)")
-
-    # 动态发现技能
-    discovered_skills = []
-    try:
-        discovered_skills = client.list_skills()
-    except Exception:
-        discovered_skills = []
-
-    if not discovered_skills:
-        try:
-            if "autonomous_agent" not in st.session_state:
-                st.session_state.autonomous_agent = AutonomousAgent()
-            discovered_skills = st.session_state.autonomous_agent.list_skills()
-        except Exception:
-            discovered_skills = []
-
-    all_experts = list_all_experts(discovered_skills)
-    expert_options = [f"{exp.avatar} {exp.name}" for exp in all_experts]
-    expert_map = {opt: exp for opt, exp in zip(expert_options, all_experts)}
-
-    col_exp_title, col_exp_btn = st.columns([3, 1])
-    with col_exp_title:
-        st.caption("请派当席坐镇专家顾问")
-    with col_exp_btn:
-        if st.button("🔄", help="热重载技能与专家团名单 (零停机即时生效)"):
+    with col_refresh_btn:
+        if st.button("🔄", help="刷新技能与专家团"):
             try:
                 client.reload_skills()
             except Exception:
                 pass
-            if "autonomous_agent" in st.session_state:
-                try:
-                    st.session_state.autonomous_agent.reload_skills()
-                except Exception:
-                    pass
-            st.toast("专家团成员与技能库已成功动态刷新！")
-            st.rerun()
+            st.toast("专家团已刷新")
+            rerun_workbench()
 
-    selected_expert_label = st.selectbox(
-        "专家顾问",
-        expert_options,
-        index=0,
-        label_visibility="collapsed",
-        help="请派各领域资深专家为您提供专属辅导与文风约束",
-    )
-    current_expert = expert_map[selected_expert_label]
-    skill_id = current_expert.id if current_expert.id != "default" else ""
+    st.markdown("#### 💬 历史创作会话")
+
+    # 遍历渲染会话列表
+    all_sids = list(st.session_state.sessions_store.keys())
+    for sid in reversed(all_sids):
+        s_data = st.session_state.sessions_store[sid]
+        s_title = s_data.get("title", f"会话 {sid}")
+        # 如果当前大纲或正文有标题，动态同步
+        d_title = (s_data["chat_state"].content or {}).get("title") or (s_data["chat_state"].draft or {}).get("title")
+        if d_title and s_title.startswith("新会话"):
+            s_title = d_title[:14] + ("..." if len(d_title) > 14 else "")
+            s_data["title"] = s_title
+
+        is_active = sid == st.session_state.current_session_id
+        display_label = f"📌 {s_title}" if is_active else f"💭 {s_title}"
+
+        col_s_item, col_s_del = st.columns([5, 1])
+        with col_s_item:
+            if st.button(
+                display_label,
+                key=f"sess_btn_{sid}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary",
+            ):
+                st.session_state.current_session_id = sid
+                rerun_workbench()
+        with col_s_del:
+            if len(st.session_state.sessions_store) > 1:
+                if st.button("✕", key=f"del_sess_{sid}", help="删除此会话"):
+                    del st.session_state.sessions_store[sid]
+                    if st.session_state.current_session_id == sid:
+                        st.session_state.current_session_id = next(iter(st.session_state.sessions_store.keys()))
+                    rerun_workbench()
+
+    st.divider()
+
+    # 坐镇专家与交付形态收纳配置
+    with st.expander("✍️ 创作顾问与参数配置", expanded=False):
+        # 1. 坐镇专家顾问 (当前创作角色)
+        discovered_skills = []
+        try:
+            discovered_skills = client.list_skills()
+        except Exception:
+            discovered_skills = []
+
+        if not discovered_skills:
+            try:
+                if "autonomous_agent" not in st.session_state:
+                    st.session_state.autonomous_agent = AutonomousAgent()
+                discovered_skills = st.session_state.autonomous_agent.list_skills()
+            except Exception:
+                discovered_skills = []
+
+        all_experts = list_all_experts(discovered_skills)
+        expert_options = [f"{exp.avatar} {exp.name}" for exp in all_experts]
+        expert_map = {opt: exp for opt, exp in zip(expert_options, all_experts)}
+
+        selected_expert_label = st.selectbox(
+            "坐镇顾问 (Expert)",
+            expert_options,
+            key=f"expert_{st.session_state.current_session_id}",
+            index=next((i for i, expert in enumerate(all_experts)
+                        if expert.id == st.session_state.sessions_store[st.session_state.current_session_id].get("expert_id", "default")), 0),
+            help="选派各细分领域专家，为您提供针对性行文规范与建议",
+        )
+        current_expert = expert_map[selected_expert_label]
+        skill_id = current_expert.id if current_expert.id != "default" else ""
+
+        # 2. 目标交付形态
+        target = st.selectbox(
+            "交付形态 (Target)",
+            ["document", "presentation", "writing"],
+            key=f"target_{st.session_state.current_session_id}",
+            index=["document", "presentation", "writing"].index(
+                st.session_state.sessions_store[st.session_state.current_session_id].get("ui_target", "document")),
+            format_func=lambda x: {
+                "document": "📄 深度长文 / Word (.docx)",
+                "presentation": "📊 方案演示 / PPT (.pptx)",
+                "writing": "📝 纯文本 / 草稿",
+            }.get(x, x),
+        )
+
+        # 3. 创作协同模式
+        interaction_mode = st.radio(
+            "创作模式 (Mode)",
+            ["🌟 自由灵感模式 (自主规划/选项直选)", "📐 结构工作流 (澄清->大纲->成稿)"],
+            index=0,
+        )
+        is_autonomous = interaction_mode.startswith("🌟")
+
+        # 4. 视觉主题
+        ui_theme = st.selectbox(
+            "画布主题 (Theme)",
+            ["☀️ 经典浅色 (Doubao Paper White)", "🌙 暗黑深邃 (Dark Canvas)"],
+            index=0,
+        )
+        is_dark = ui_theme.startswith("🌙")
 
 
 # ---------------------------------------------------------------------------
@@ -377,80 +475,84 @@ div.stButton > button[kind="primary"]:hover {{
     color: #0071e3 !important;
     border-bottom-color: #0071e3 !important;
 }}
+
+/* 豆包式写文章右侧白板画布 (Doubao Paper Canvas) */
+.doubao-paper-canvas {{
+    background: {card_bg};
+    border: 1px solid {card_border};
+    border-radius: 18px;
+    padding: 32px 36px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.02);
+    min-height: 520px;
+    margin-bottom: 20px;
+}}
+
+.doubao-doc-header {{
+    border-bottom: 1px solid {card_border};
+    padding-bottom: 18px;
+    margin-bottom: 22px;
+}}
+
+.doubao-doc-title {{
+    font-size: 24px;
+    font-weight: 700;
+    color: {text_main};
+    letter-spacing: -0.5px;
+    line-height: 1.3;
+}}
+
+.doubao-doc-meta {{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    color: {text_sub};
+    margin-top: 8px;
+}}
+
+.doubao-section-block {{
+    background: rgba(0, 113, 227, 0.02);
+    border-left: 3px solid #0071e3;
+    padding: 14px 18px;
+    border-radius: 0 12px 12px 0;
+    margin-bottom: 18px;
+}}
+
+.doubao-section-title {{
+    font-size: 16px;
+    font-weight: 600;
+    color: {text_main};
+    margin-bottom: 8px;
+}}
+
+.doubao-section-body {{
+    font-size: 14.5px;
+    line-height: 1.7;
+    color: {text_caption};
+}}
 </style>
 """
 st.markdown(APPLE_CSS, unsafe_allow_html=True)
 
 
-# 渲染侧边栏坐镇专家卡片 (Seated Expert Profile Card)
-with st.sidebar:
-    tags_html = " ".join(
-        f'<span style="background: rgba(0, 113, 227, 0.08); color: #0071e3; border: 1px solid rgba(0, 113, 227, 0.18); border-radius: 9999px; padding: 2px 8px; font-size: 11px; font-weight: 500;">#{tag}</span>'
-        for tag in current_expert.tags
-    )
-    st.markdown(
-        f"""
-        <div style="background: {card_bg}; border: 1px solid {card_border}; border-radius: 14px; padding: 14px 16px; margin: 10px 0 16px 0; box-shadow: {card_shadow};">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div style="font-size: 26px; background: rgba(0, 113, 227, 0.08); border-radius: 10px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(0, 113, 227, 0.15);">
-                    {current_expert.avatar}
-                </div>
-                <div>
-                    <div style="font-size: 15px; font-weight: 600; color: {text_main};">{current_expert.name}</div>
-                    <div style="font-size: 12px; color: {text_sub};">{current_expert.title}</div>
-                </div>
-            </div>
-            <div style="margin-top: 10px; font-size: 12px; color: {text_caption}; line-height: 1.5;">
-                {current_expert.intro}
-            </div>
-            <div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px;">
-                {tags_html}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.divider()
-    reset = st.button("✨ 重置并新建会话", use_container_width=True)
-
 # ---------------------------------------------------------------------------
-# 会话状态管理
+# 从多会话存储池同步当前活跃会话状态 (Sync Active Session from store)
 # ---------------------------------------------------------------------------
-context = (engine, target, skill_id.strip(), interaction_mode)
-if reset or "chat_context" not in st.session_state or st.session_state.chat_context != context:
-    st.session_state.chat_context = context
-    st.session_state.chat_state = ChatState(engine=engine)
-    st.session_state.messages = []
-    st.session_state.downloads = []
-    st.session_state.current_attachment = None
-    st.session_state.active_follow_ups = []
-    st.session_state.uploader_key = st.session_state.get("uploader_key", 0) + 1
+active_sess = load_session(st.session_state)
+state: ChatState = active_sess["chat_state"]
+if active_sess.get("ui_target", target) != target:
+    state.autonomous_memory["target_kind"] = target
+active_sess["ui_target"] = target
+active_sess["expert_id"] = skill_id or "default"
+# A follow-up inherits the actual last output format until the user changes it.
+conversation_target = state.autonomous_memory.get("target_kind") or (state.content or {}).get("target_kind") or (state.draft or {}).get("target_kind") or target
 
 if "autonomous_agent" not in st.session_state:
     st.session_state.autonomous_agent = AutonomousAgent()
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "downloads" not in st.session_state:
-    st.session_state.downloads = []
-if "current_attachment" not in st.session_state:
-    st.session_state.current_attachment = None
-if "active_follow_ups" not in st.session_state:
-    st.session_state.active_follow_ups = []
-if "uploader_key" not in st.session_state:
-    st.session_state.uploader_key = 0
 
-state: ChatState = st.session_state.chat_state
-
+# 侧边栏底部简要展示当前会话 ID
 with st.sidebar:
-    st.caption(f"🆔 会话: `{state.session[:8]}` | 状态版本: `v{state.session_version}`")
-    with st.expander("🛠️ 工作台底层状态 (State JSON)", expanded=False):
-        st.caption("Guidance:")
-        st.json(state.guidance or {})
-        st.caption("Draft:")
-        st.json(state.draft or {})
-        st.caption("Content:")
-        st.json(state.content or {})
+    st.caption(f"🆔 当前会话: `{state.session[:8]}` | 版本: `v{state.session_version}`")
 
 
 # ---------------------------------------------------------------------------
@@ -557,85 +659,139 @@ def format_assistant_message(state: ChatState, operation: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Apple 风格顶栏与工作台状态标识
+# 豆包风格顶栏：沉浸式文档导航与 🎧 高级设置收纳
 # ---------------------------------------------------------------------------
-mode_badge = "🌟 自由探索模式" if is_autonomous else "📐 专业工作流模式"
+doc_title = (state.content or {}).get("title") or (state.draft or {}).get("title") or "未命名创作工程"
+doc_sections = (state.content or {}).get("sections", [])
+total_words = sum(len(s.get("body", "")) for s in doc_sections)
+if not total_words and state.content and state.content.get("summary"):
+    total_words = len(state.content.get("summary"))
+
+mode_label = "🌟 自由灵感" if is_autonomous else "📐 结构工作流"
 mode_badge_style = (
     "background: rgba(255, 255, 255, 0.08); color: #e5e5ea; border: 1px solid rgba(255, 255, 255, 0.1);"
     if is_dark
     else "background: #f2f2f7; color: #1d1d1f; border: 1px solid rgba(0, 0, 0, 0.08);"
 )
-st.markdown(
-    f"""
-    <div class="apple-header">
-        <div class="apple-title-wrap">
-            <div class="apple-logo-badge">✨</div>
+
+# 顶部导航行：左侧品牌与文档名，右侧坐镇专家与 🎧 高级设置
+col_nav_left, col_nav_right = st.columns([7, 3])
+with col_nav_left:
+    st.markdown(
+        f"""
+        <div style="display: flex; align-items: center; gap: 14px; padding: 4px 0 8px 0;">
+            <div class="apple-logo-badge" style="width: 38px; height: 38px; font-size: 20px; border-radius: 10px;">✨</div>
             <div>
-                <h1 class="apple-main-title">GenSlide · AI 写作工作台</h1>
-                <div class="apple-sub-title">Next-Gen Intelligent Document & Presentation Studio</div>
+                <div style="font-size: 17px; font-weight: 700; color: {text_main}; letter-spacing: -0.3px; display: flex; align-items: center; gap: 8px;">
+                    {doc_title}
+                    <span style="font-size: 11px; font-weight: 500; color: #0071e3; background: rgba(0, 113, 227, 0.08); padding: 2px 8px; border-radius: 9999px; border: 1px solid rgba(0, 113, 227, 0.2);">
+                        {current_stage_name}
+                    </span>
+                </div>
+                <div style="font-size: 11px; color: {text_sub}; margin-top: 2px; display: flex; align-items: center; gap: 12px;">
+                    <span>字数统计: <b>{total_words}</b> 字</span>
+                    <span>•</span>
+                    <span>目标形态: <b>{target}</b></span>
+                    <span>•</span>
+                    <span>坐镇专家: <b>{current_expert.avatar} {current_expert.name}</b></span>
+                </div>
             </div>
         </div>
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <span class="apple-pill">
-                <span class="status-dot"></span> 坐镇专家：{current_expert.avatar} {current_expert.name}
-            </span>
-            <span style="display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 500; {mode_badge_style}">
-                {mode_badge}
-            </span>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+        """,
+        unsafe_allow_html=True,
+    )
+
+with col_nav_right:
+    col_status, col_headphone = st.columns([1, 1])
+    with col_status:
+        st.markdown(
+            f"""
+            <div style="text-align: right; padding-top: 10px;">
+                <span style="display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 9999px; font-size: 11px; font-weight: 500; {mode_badge_style}">
+                    <span class="status-dot"></span> {mode_label}
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with col_headphone:
+        # 🎧 专用高级配置抽屉（默认完全折叠对普通用户隐蔽，仅供调试或网关配置使用）
+        with st.popover("🎧 高级控制", help="服务网关配置与系统级底层调试控制台 (默认已隐藏)"):
+            st.markdown("#### 🎧 服务网关与通信配置")
+            st.caption("以下技术参数已自动调优，常规写作无需修改：")
+            new_bff = st.text_input("BFF URL", value=st.session_state.bff_url)
+            new_token = st.text_input("Token", value=st.session_state.bff_token, type="password")
+            new_service = st.text_input("Agent URL", value=st.session_state.service_url)
+            new_engine = st.selectbox("Engine", ["agentscope", "mock"], index=0 if st.session_state.engine == "agentscope" else 1)
+
+            if st.button("💾 保存并应用网关连接", use_container_width=True, type="primary"):
+                st.session_state.bff_url = new_bff
+                st.session_state.bff_token = new_token
+                st.session_state.service_url = new_service
+                st.session_state.engine = new_engine
+                st.toast("✅ 网关通信参数已成功更新！")
+                rerun_workbench()
+
+            st.divider()
+            with st.expander("🛠️ 查看系统底层状态数据", expanded=False):
+                st.caption("Guidance:")
+                st.json(state.guidance or {})
+                st.caption("Draft:")
+                st.json(state.draft or {})
+                st.caption("Content:")
+                st.json(state.content or {})
 
 if not is_autonomous:
     # 顶部阶段 Stepper 状态条
     col_s1, col_s2, col_s3, col_s4 = st.columns(4)
     with col_s1:
         if current_stage_idx == 1:
-            st.info("🔹 **1. 需求澄清 (Clarify)**")
+            st.info("🔹 **1. 需求澄清**")
         elif current_stage_idx > 1:
             st.success("✔ **1. 需求澄清**")
         else:
             st.caption("1. 需求澄清")
     with col_s2:
         if current_stage_idx == 2:
-            st.info("🔹 **2. 制定大纲 (Outline)**")
+            st.info("🔹 **2. 制定大纲**")
         elif current_stage_idx > 2:
             st.success("✔ **2. 制定大纲**")
         else:
             st.caption("2. 制定大纲")
     with col_s3:
         if current_stage_idx == 3:
-            st.info("🔹 **3. 锁定确认 (Confirm)**")
+            st.info("🔹 **3. 锁定确认**")
         elif current_stage_idx > 3:
             st.success("✔ **3. 锁定确认**")
         else:
             st.caption("3. 锁定确认")
     with col_s4:
         if current_stage_idx == 4:
-            st.success("🎉 **4. 交付完成 (Generate)**")
+            st.success("🎉 **4. 交付成稿**")
         else:
-            st.caption("4. 内容生成")
+            st.caption("4. 交付成稿")
 else:
-    with st.container():
-        st.markdown(
-            f"""
-            <div style="background: {banner_bg}; border: 1px solid {banner_border}; border-radius: 14px; padding: 12px 18px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; box-shadow: {card_shadow};">
-                <div style="font-size: 13px; color: {text_main};">
-                    🌟 <b>自由探索模式</b> · 由 <b>{current_expert.name}</b> 协同自主规划。支持发散探讨与结构化追问，可随时一键直出交付物。
-                </div>
-                <div style="font-size: 12px; color: {text_sub};">
-                    大纲状态: {'✅ 已就绪' if state.draft else '⏳ 规划中'} ｜ 正文状态: {'🎉 已产出' if state.content else '⏳ 待撰写'}
-                </div>
+    st.markdown(
+        f"""
+        <div style="background: {banner_bg}; border: 1px solid {banner_border}; border-radius: 12px; padding: 10px 16px; margin: 4px 0 14px 0; display: flex; align-items: center; justify-content: space-between; box-shadow: {card_shadow};">
+            <div style="font-size: 13px; color: {text_main};">
+                🌟 <b>自由灵感模式</b> · 由 <b>{current_expert.name}</b> 实时协同。支持发散创作与交互追问胶囊，随时一键直出交付物。
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            <div style="font-size: 12px; color: {text_sub};">
+                大纲: {'✅ 已就绪' if state.draft else '⏳ 规划中'} ｜ 正文: {'🎉 已产出' if state.content else '⏳ 待撰写'}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-st.divider()
-
-chat_col, panel_col = st.columns([3, 2], gap="large")
+# ---------------------------------------------------------------------------
+# 动态分栏布局：支持助手区与写作工作台切换 (2栏收拢 vs 3栏全开)
+# ---------------------------------------------------------------------------
+if st.session_state.show_workbench:
+    chat_col, panel_col = st.columns([1, 1], gap="medium")
+else:
+    chat_col, panel_col = st.columns([1, 0.001], gap="small")
 
 
 # ---------------------------------------------------------------------------
@@ -643,16 +799,16 @@ chat_col, panel_col = st.columns([3, 2], gap="large")
 # ---------------------------------------------------------------------------
 def run_autonomous_turn(user_msg: str):
     user_display = user_msg.strip()
-    turn_target = detect_target_kind(user_display, default=target)
+    turn_target = detect_target_kind(user_display, default=conversation_target)
     with chat_col:
         with st.chat_message("user", avatar="👤"):
             st.markdown(user_display)
         with st.chat_message("assistant", avatar=current_expert.avatar):
-            with st.spinner(f"{current_expert.avatar} {current_expert.name} 正在深度研判并调用专家能力..."):
+            with st.status("正在处理你的请求…", expanded=True) as turn_status:
                 att_snippet = ""
                 if st.session_state.get("current_attachment"):
                     att = st.session_state.current_attachment
-                    att_snippet = att.get("text_snippet", "")
+                    att_snippet = att.get("text", att.get("text_snippet", ""))
 
                 try:
                     res = st.session_state.autonomous_agent.step(
@@ -663,8 +819,13 @@ def run_autonomous_turn(user_msg: str):
                         current_outline=st.session_state.chat_state.draft,
                         current_content=st.session_state.chat_state.content,
                         attachment_text=att_snippet,
+                        memory={**st.session_state.chat_state.autonomous_memory,
+                                "requirements": st.session_state.chat_state.requirements},
+                        progress=lambda label: turn_status.update(label=label),
                     )
 
+                    st.session_state.chat_state.autonomous_memory = res.memory
+                    st.session_state.chat_state.requirements = res.memory.get("requirements", {})
                     # 状态同步到界面看板
                     if res.outline:
                         res.outline["target_kind"] = res.target_kind
@@ -673,21 +834,14 @@ def run_autonomous_turn(user_msg: str):
                         res.content["target_kind"] = res.target_kind
                         st.session_state.chat_state.content = res.content
                     if res.rendered_file:
-                        existing = next(
-                            (d for d in st.session_state.downloads if d["name"] == res.rendered_file["name"]), None
-                        )
-                        if existing:
-                            existing["data"] = res.rendered_file["data"]
-                        else:
-                            st.session_state.downloads.append(res.rendered_file)
+                        # Keep prior versions so a revision can be compared or downloaded.
+                        st.session_state.downloads.append(res.rendered_file)
 
                     # 同步激活的选项式追问 (Option Chips)
                     st.session_state.active_follow_ups = res.follow_up_questions or []
 
                     # 格式化展示内容
                     asst_parts = []
-                    if res.thought:
-                        asst_parts.append(f"💭 *{current_expert.name} 决策思考*: {res.thought}")
                     asst_parts.append(res.reply_text)
                     if res.rendered_file:
                         kind_label = (
@@ -699,7 +853,10 @@ def run_autonomous_turn(user_msg: str):
                             f"📦 **已完成文件渲染**：`{res.rendered_file['name']}`（{kind_label}，前往右侧看板「💾 文件下载」查收）"
                         )
 
+                    if res.outline and not res.content:
+                        asst_parts.append("\n".join(f"{i}. {n['title']}" for i, n in enumerate(res.outline["nodes"], 1)))
                     asst_msg = "\n\n".join(asst_parts)
+                    turn_status.update(label="本轮完成", state="complete", expanded=False)
                     st.session_state.messages.append({"role": "user", "text": user_display})
                     st.session_state.messages.append(
                         {
@@ -707,15 +864,18 @@ def run_autonomous_turn(user_msg: str):
                             "text": asst_msg,
                             "avatar": current_expert.avatar,
                             "expert": current_expert.name,
+                            "context_text": res.reply_text,
+                            "follow_up_questions": res.follow_up_questions,
                         }
                     )
-                    st.rerun()
+                    rerun_workbench()
                 except Exception as exc:
-                    err_msg = f"❌ 专家处理失败: {exc}"
+                    turn_status.update(label="本轮未完成，原稿已保留", state="error")
+                    err_msg = f"❌ 本轮处理失败: {exc}"
                     st.error(err_msg)
                     st.session_state.messages.append({"role": "user", "text": user_display})
-                    st.session_state.messages.append({"role": "assistant", "text": err_msg, "avatar": "⚠️"})
-                    st.rerun()
+                    st.session_state.messages.append({"role": "assistant", "text": err_msg, "avatar": "⚠️", "failed": True})
+                    rerun_workbench()
 
 
 # ---------------------------------------------------------------------------
@@ -756,6 +916,26 @@ def run_action(
         with st.chat_message("assistant", avatar=current_expert.avatar):
             with st.spinner(f"{current_expert.avatar} {current_expert.name} 正在推进【{op_labels.get(operation, operation)}】..."):
                 try:
+                    # Free-mode outlines have no backend draft/version identity.
+                    # Bring their requirements into the guided workflow without
+                    # pretending that a local outline was already confirmed there.
+                    if state.draft and not state.draft.get("draft_id"):
+                        saved_draft, saved_content = deepcopy(state.draft), deepcopy(state.content)
+                        handoff = json.dumps({
+                            "已确认的创作要求": state.requirements,
+                            "当前大纲": saved_draft,
+                            "用户本轮指令": message,
+                        }, ensure_ascii=False)
+                        try:
+                            client.execute("clarify", target_kind=effective_target,
+                                           message="从自由创作转入专业流程，保留下列要求与结构：" + handoff,
+                                           state=state, current_file_ids=current_file_ids,
+                                           skill_id=skill_id.strip() or None)
+                        finally:
+                            # Preserve the visible draft even if the remote call fails.
+                            state.draft, state.content = saved_draft, saved_content
+                        operation = "create_outline"
+                        message = "请将现有结构整理为专业流程大纲，保留已确认要求：" + handoff
                     result = client.execute(
                         operation,
                         target_kind=effective_target,
@@ -789,7 +969,7 @@ def run_action(
                             "expert": current_expert.name,
                         }
                     )
-                    st.rerun()
+                    rerun_workbench()
                 except ChatClientError as exc:
                     st.session_state.messages.append({"role": "user", "text": user_display})
                     att_name = (st.session_state.get("current_attachment") or {}).get("filename", "所选附件")
@@ -825,7 +1005,7 @@ def run_action(
                         st.error(f"❌ 请求失败: {exc}")
 
                     st.session_state.messages.append({"role": "assistant", "text": err_text, "avatar": "⚠️"})
-                    st.rerun()
+                    rerun_workbench()
 
 
 # ---------------------------------------------------------------------------
@@ -833,6 +1013,12 @@ def run_action(
 # ---------------------------------------------------------------------------
 with chat_col:
     st.subheader("💬 对话工作区")
+    if is_autonomous and state.requirements:
+        with st.expander("已记住的创作要求", expanded=False):
+            requirement_labels = {"topic": "主题", "audience": "受众", "language": "语言", "length": "篇幅", "style": "风格", "purpose": "用途", "constraints": "其他要求"}
+            for name, value in state.requirements.items():
+                st.markdown(f"**{requirement_labels.get(name, name)}**：{value}")
+            st.caption("可以直接在对话里修改或取消这些要求。")
     chat_container = st.container()
 
     with chat_container:
@@ -850,7 +1036,7 @@ with chat_col:
             with st.chat_message(item["role"], avatar=msg_avatar):
                 st.markdown(item["text"])
 
-        # 渲染自由探索模式下的 3-5 项结构化追问与交互式选项胶囊 (Option Chips)
+        # 可选追问一次提交，避免选择一项就丢失其他问题。
         follow_ups = st.session_state.get("active_follow_ups", [])
         if is_autonomous and follow_ups:
             chips_title_color = "#0071e3" if not is_dark else "#2997ff"
@@ -865,16 +1051,26 @@ with chat_col:
                 """,
                 unsafe_allow_html=True,
             )
-            for q_idx, q_item in enumerate(follow_ups, 1):
-                q_text = q_item.get("question", "")
-                options = q_item.get("options", [])
-                st.markdown(f"**{q_text}**")
-                cols = st.columns(min(len(options), 4))
-                for c_i, opt in enumerate(options):
-                    btn_key = f"chip_{q_idx}_{c_i}_{abs(hash(opt)) % 100000}"
-                    if cols[c_i % len(cols)].button(f"👉 {opt}", key=btn_key, use_container_width=True):
-                        st.session_state.active_follow_ups = []
-                        run_autonomous_turn(f"针对【{q_text}】，我的选择是：{opt}")
+            answers = []
+            with st.form(f"followups_{st.session_state.current_session_id}"):
+                for q_idx, q_item in enumerate(follow_ups, 1):
+                    q_text = q_item.get("question", "")
+                    options = q_item.get("options", [])
+                    question_key = hashlib.sha256(q_text.encode()).hexdigest()[:12]
+                    if options:
+                        answer = st.selectbox(q_text, ["暂不选择", *options],
+                                              key=f"answer_{st.session_state.current_session_id}_{question_key}")
+                        if answer != "暂不选择":
+                            answers.append(f"针对【{q_text}】，我的选择是：{answer}")
+                    else:
+                        answer = st.text_input(q_text, key=f"answer_{st.session_state.current_session_id}_{question_key}")
+                        if answer.strip():
+                            answers.append(f"针对【{q_text}】，我的回答是：{answer.strip()}")
+                submitted = st.form_submit_button("提交补充", use_container_width=True)
+            if submitted and answers:
+                run_autonomous_turn("\n".join(answers))
+            elif submitted:
+                st.caption("可以选择一项，也可以直接在聊天框继续交流。")
 
     # 快捷操作建议区（专业模式下渲染）
     guidance = state.guidance or {}
@@ -916,7 +1112,7 @@ with chat_col:
         if att_c2.button("🗑️ 移除附件", key="btn_remove_att", use_container_width=True, help="移除当前材料并恢复纯文本交互"):
             st.session_state.current_attachment = None
             st.session_state.uploader_key += 1
-            st.rerun()
+            rerun_workbench()
 
         # 智能快捷操作提示
         stem_name = Path(att["filename"]).stem
@@ -947,12 +1143,12 @@ with chat_col:
         uploaded = st.file_uploader(
             "选择文件",
             type=["txt", "md", "pdf", "docx"],
-            key=f"uploader_{st.session_state.uploader_key}",
+            key=f"uploader_{st.session_state.current_session_id}_{st.session_state.uploader_key}",
             label_visibility="collapsed",
         )
         if uploaded is not None:
             file_bytes = uploaded.getvalue()
-            file_hash = f"{uploaded.name}_{len(file_bytes)}"
+            file_hash = hashlib.sha256(uploaded.name.encode() + file_bytes).hexdigest()
             if (
                 not st.session_state.get("current_attachment")
                 or st.session_state.current_attachment.get("hash") != file_hash
@@ -963,41 +1159,24 @@ with chat_col:
                 else:
                     with st.spinner(f"正在上传材料「{uploaded.name}」到 BFF 网关..."):
                         try:
+                            attachment_text = read_attachment_bytes(uploaded.name, file_bytes)
                             uploaded_res = client.upload(
                                 uploaded.name, file_bytes, uploaded.type, session_id=state.session
                             )
                             size_kb = max(round(len(file_bytes) / 1024, 1), 0.1)
-
-                            text_snippet = ""
-                            try:
-                                if uploaded.name.endswith((".txt", ".md")):
-                                    text_snippet = file_bytes.decode("utf-8-sig", errors="ignore")[:20000]
-                                elif uploaded.name.endswith(".pdf"):
-                                    from pypdf import PdfReader
-
-                                    text_snippet = "\n".join(
-                                        p.extract_text() or "" for p in PdfReader(io.BytesIO(file_bytes)).pages
-                                    )[:20000]
-                                elif uploaded.name.endswith(".docx"):
-                                    from docx import Document
-
-                                    text_snippet = "\n".join(
-                                        p.text for p in Document(io.BytesIO(file_bytes)).paragraphs
-                                    )[:20000]
-                            except Exception:
-                                pass
 
                             st.session_state.current_attachment = {
                                 "file_id": uploaded_res["file_id"],
                                 "filename": uploaded.name,
                                 "size_str": f"{size_kb} KB",
                                 "hash": file_hash,
-                                "text_snippet": text_snippet,
+                                "text": attachment_text,
+                                "char_count": len(attachment_text),
                             }
-                            st.success(f"✅ 成功挂载材料: {uploaded.name} ({size_kb} KB)")
-                            st.rerun()
+                            st.success(f"✅ 已读取材料: {uploaded.name} · {len(attachment_text)} 字符（含可解析表格）")
+                            rerun_workbench()
                         except Exception as upload_err:
-                            st.error(f"❌ 附件上传到网关失败: {upload_err}")
+                            st.error(f"❌ 材料上传或解析失败，未替换现有材料: {upload_err}")
 
     # 专业模式操作快捷指令栏
     if not is_autonomous:
@@ -1040,16 +1219,25 @@ with chat_col:
                 chosen_op = op
     else:
         chosen_op = None
-        st.caption(
-            f"💬 **自由探索提示**：直接向【{current_expert.name}】提出任何创作想法或任务需求。专家将深度解析并提供针对性选项建议。"
-        )
+
+    # 聊天输入辅助栏（包含打开/收起写作工作台按钮，快捷附件与操作）
+    col_in_btn1, col_in_btn2 = st.columns([1, 1])
+    with col_in_btn1:
+        wb_btn_label = "📖 收起写作工作台" if st.session_state.show_workbench else "✨ 打开写作工作台"
+        wb_btn_help = "点击在右侧展开沉浸式写作工作台画布（整体自适应分成3栏）" if not st.session_state.show_workbench else "点击收起右侧工作台，扩大对话区空间"
+        if st.button(wb_btn_label, key="btn_toggle_workbench", use_container_width=True, type="primary" if not st.session_state.show_workbench else "secondary", help=wb_btn_help):
+            st.session_state.show_workbench = not st.session_state.show_workbench
+            rerun_workbench()
+
+    with col_in_btn2:
+        target_name = "Word 文档 (.docx)" if target == "document" else ("幻灯片 (.pptx)" if target == "presentation" else "纯正文")
+        st.caption(f"创作目标：**{target_name}** ｜ 顾问：**{current_expert.name}**")
 
     # 聊天输入框
     prompt = st.chat_input("输入你的需求、修改意见、自由探讨，或直接下达创作指令...")
 
     if is_autonomous:
         if prompt:
-            st.session_state.active_follow_ups = []
             run_autonomous_turn(prompt)
     else:
         if prompt or chosen_op:
@@ -1107,145 +1295,206 @@ with chat_col:
 
 
 # ---------------------------------------------------------------------------
-# 右侧：实时产物工作台看板 (Apple Studio Inspector)
+# 右侧：实时产物写作工作台画布看板 (仅在用户打开工作台时展开为第 3 栏)
 # ---------------------------------------------------------------------------
-with panel_col:
-    st.subheader("📑 创作看板")
+if st.session_state.show_workbench:
+    with panel_col:
+        col_wb_head1, col_wb_head2 = st.columns([4, 1])
+        with col_wb_head1:
+            st.subheader("📑 写作工作台")
+        with col_wb_head2:
+            if st.button("✕ 收起", key="btn_close_panel", help="收起写作工作台"):
+                st.session_state.show_workbench = False
+                rerun_workbench()
 
-    tab_outline, tab_content, tab_download, tab_council = st.tabs(
-        ["📑 结构大纲", "📖 交付正文", "💾 文件下载", "👥 专家智囊团"]
-    )
+        tab_outline, tab_content, tab_download, tab_council = st.tabs(
+            ["📑 结构大纲", "📖 交付正文", "💾 文件下载", "👥 专家智囊团"]
+        )
 
-    with tab_outline:
-        if state.draft:
-            draft = state.draft
-            is_locked = bool(draft.get("confirmed_hash"))
-            st.markdown(f"### 📑 {draft.get('title', '未命名大纲')}")
-            badge_confirmed = "🔒 **已锁定确认**" if is_locked else "⏳ **草稿待确认**"
-            st.caption(
-                f"版本: `v{draft.get('outline_version', 1)}` | 目标形态: `{draft.get('target_kind', target)}` | 状态: {badge_confirmed}"
-            )
-
-            nodes = draft.get("nodes", [])
-            if not nodes:
-                st.info("大纲中暂无章节节点")
-            for idx, node in enumerate(nodes, 1):
-                nid = node.get("node_id", f"node-{idx}")
-                ntitle = node.get("title", f"第 {idx} 节")
-                st.markdown(
-                    f"""
-                    <div style="background: {card_bg}; border: 1px solid {card_border}; border-radius: 12px; padding: 12px 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: {card_shadow};">
-                        <span style="font-weight: 600; font-size: 14px; color: {text_main};">{idx}. 📌 {ntitle}</span>
-                        <code style="font-size: 11px; background: {tag_bg}; border: 1px solid {tag_border}; padding: 3px 8px; border-radius: 6px; color: {text_main}; font-weight: 500;">{nid}</code>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+        with tab_outline:
+            if state.draft:
+                draft = state.draft
+                is_locked = bool(draft.get("confirmed_hash"))
+                st.markdown(f"### 📑 {draft.get('title', '未命名大纲')}")
+                badge_confirmed = "🔒 **已锁定确认**" if is_locked else "⏳ **草稿待确认**"
+                st.caption(
+                    f"版本: `v{draft.get('outline_version', 1)}` | 目标形态: `{draft.get('target_kind', target)}` | 状态: {badge_confirmed}"
                 )
-        else:
-            st.info("💡 尚未生成大纲。请在左侧对话区提出写作构想或上传参考材料。")
 
-    with tab_content:
-        if state.content:
-            content = state.content
-            st.markdown(f"## 📖 {content.get('title', '交付物正文')}")
-            if content.get("summary"):
-                st.info(f"**核心摘要**：{content.get('summary')}")
-
-            sections = content.get("sections", [])
-            for idx, sec in enumerate(sections, 1):
-                st.markdown(f"### {idx}. {sec.get('title', '')}")
-                body = sec.get("body", "")
-                if body:
-                    st.markdown(body)
-                notes = sec.get("notes", "")
-                if notes:
-                    with st.expander(f"📝 查看第 {idx} 节阐述与演讲备注", expanded=False):
-                        st.caption(notes)
-                st.divider()
-        else:
-            st.info("💡 正文内容尚未生成。当大纲确认后，AI 将自动出稿并排版。")
-
-    with tab_download:
-        st.markdown("### 💾 交付成果文件导出")
-        if not st.session_state.downloads:
-            st.info("暂无生成好的文件可供下载。")
-        else:
-            for item in st.session_state.downloads:
-                fname = item["name"]
-                fdata = item["data"]
-                size_kb = max(round(len(fdata) / 1024, 1), 0.1)
-                is_docx = fname.endswith(".docx")
-                is_pptx = fname.endswith(".pptx")
-                icon = "📄" if is_docx else ("📊" if is_pptx else "📝")
-                badge_type = "Word 文档 (.docx)" if is_docx else ("演示幻灯片 (.pptx)" if is_pptx else "文本文件")
-
-                st.markdown(
-                    f"""
-                    <div style="background: {card_bg}; border: 1px solid {card_border}; border-radius: 14px; padding: 14px 18px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; box-shadow: {card_shadow};">
-                        <div>
-                            <div style="font-size: 15px; font-weight: 600; color: {text_main};">{icon} {fname}</div>
-                            <div style="font-size: 12px; color: {text_sub}; margin-top: 3px;">格式: {badge_type} ｜ 大小: {size_kb} KB</div>
+                nodes = draft.get("nodes", [])
+                if not nodes:
+                    st.info("大纲中暂无章节节点")
+                for idx, node in enumerate(nodes, 1):
+                    nid = node.get("node_id", f"node-{idx}")
+                    ntitle = node.get("title", f"第 {idx} 节")
+                    st.markdown(
+                        f"""
+                        <div style="background: {card_bg}; border: 1px solid {card_border}; border-radius: 12px; padding: 12px 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: {card_shadow};">
+                            <span style="font-weight: 600; font-size: 14px; color: {text_main};">{idx}. 📌 {ntitle}</span>
+                            <code style="font-size: 11px; background: {tag_bg}; border: 1px solid {tag_border}; padding: 3px 8px; border-radius: 6px; color: {text_main}; font-weight: 500;">{nid}</code>
                         </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                mime = (
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    if is_docx
-                    else (
-                        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                        if is_pptx
-                        else "application/octet-stream"
+                        """,
+                        unsafe_allow_html=True,
                     )
-                )
-                st.download_button(
-                    label=f"⬇️ 立即下载 {fname}",
-                    data=fdata,
-                    file_name=fname,
-                    mime=mime,
-                    key=f"dl_btn_{item['id']}",
-                    use_container_width=True,
-                    type="primary",
-                )
+            else:
+                st.info("💡 尚未生成大纲。请在左侧对话区提出写作构想或上传参考材料。")
 
-    with tab_council:
-        st.markdown("### 👥 专家顾问团队成员名录")
-        st.caption("GenSlide AI 写作工作台联合业界专家顾问，提供各细分领域的专业能力支撑：")
+        with tab_content:
+            if state.content:
+                content = state.content
+                c_title = content.get("title", "未命名文章")
+                c_summary = content.get("summary", "")
+                sections = content.get("sections", [])
+                sec_count = len(sections)
 
-        for exp in all_experts:
-            is_current = exp.id == current_expert.id
-            border_style = (
-                "border: 1.5px solid #0071e3; box-shadow: 0 4px 18px rgba(0, 113, 227, 0.15);"
-                if is_current
-                else f"border: 1px solid {card_border};"
-            )
-            current_tag = '<span style="background: #0071e3; color: white; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600;">🟢 当前坐镇</span>' if is_current else ""
-            t_html = " ".join(
-                f'<span style="background: {tag_bg}; color: {text_main}; border: 1px solid {tag_border}; border-radius: 4px; padding: 2px 8px; font-size: 10px; font-weight: 500;">{t}</span>'
-                for t in exp.tags
-            )
+                # 拼装纯文本正文用于快捷一键复制
+                full_text_lines = [f"# {c_title}\n"]
+                if c_summary:
+                    full_text_lines.append(f"> 摘要：{c_summary}\n")
+                for idx, sec in enumerate(sections, 1):
+                    full_text_lines.append(f"## {idx}. {sec.get('title', '')}\n")
+                    if sec.get("body"):
+                        full_text_lines.append(f"{sec.get('body')}\n")
+                    if sec.get("notes"):
+                        full_text_lines.append(f"> 备注说明：{sec.get('notes')}\n")
+                full_article_text = "\n".join(full_text_lines)
 
-            st.markdown(
-                f"""
-                <div style="background: {card_bg}; {border_style} border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; box-shadow: {card_shadow};">
-                    <div style="display: flex; align-items: center; justify-content: space-between;">
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 24px;">{exp.avatar}</span>
-                            <div>
-                                <strong style="font-size: 14px; color: {text_main};">{exp.name}</strong>
-                                <div style="font-size: 11px; color: {text_sub};">{exp.title}</div>
+                # 画布工具栏
+                col_bar1, col_bar2 = st.columns([3, 1])
+                with col_bar1:
+                    st.caption(f"📊 正文统计：约 {len(full_article_text)} 字 ｜ 共 {sec_count} 个章节")
+                with col_bar2:
+                    with st.popover("📋 复制全文", help="点击弹出全文快速复制框"):
+                        st.text_area("直接全选复制 (Command/Ctrl + A)", value=full_article_text, height=240)
+
+                # 沉浸式豆包纸质白板画布排版
+                st.markdown(
+                    f"""
+                    <div class="doubao-paper-canvas">
+                        <div class="doubao-doc-header">
+                            <div class="doubao-doc-title">📖 {c_title}</div>
+                            <div class="doubao-doc-meta">
+                                <span>字数: <b>{len(full_article_text)}</b></span>
+                                <span>•</span>
+                                <span>章节: <b>{sec_count}</b> 节</span>
+                                <span>•</span>
+                                <span>形态: <b>{target}</b></span>
                             </div>
                         </div>
-                        <div>{current_tag}</div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                if c_summary:
+                    st.info(f"**💡 核心摘要与主旨**：\n\n{c_summary}")
+
+                for idx, sec in enumerate(sections, 1):
+                    sec_title = sec.get("title", f"第 {idx} 节")
+                    sec_body = sec.get("body", "")
+                    st.markdown(
+                        f"""
+                        <div class="doubao-section-block">
+                            <div class="doubao-section-title">{idx}. 📌 {sec_title}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    if sec_body:
+                        st.markdown(sec_body)
+                    notes = sec.get("notes", "")
+                    if notes:
+                        with st.expander(f"📝 查看第 {idx} 节演说备注与要点解析", expanded=False):
+                            st.caption(notes)
+                    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+                st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                st.info("💡 正文内容尚未生成。在左侧对话中与专家确定大纲后，AI 将自动出稿并排版呈现。")
+
+        with tab_download:
+            st.markdown("### 💾 交付成果文件导出")
+            if not st.session_state.downloads:
+                st.info("暂无生成好的文件可供下载。")
+            else:
+                for item in st.session_state.downloads:
+                    fname = item["name"]
+                    fdata = item["data"]
+                    size_kb = max(round(len(fdata) / 1024, 1), 0.1)
+                    is_docx = fname.endswith(".docx")
+                    is_pptx = fname.endswith(".pptx")
+                    icon = "📄" if is_docx else ("📊" if is_pptx else "📝")
+                    badge_type = "Word 文档 (.docx)" if is_docx else ("演示幻灯片 (.pptx)" if is_pptx else "文本文件")
+
+                    st.markdown(
+                        f"""
+                        <div style="background: {card_bg}; border: 1px solid {card_border}; border-radius: 14px; padding: 14px 18px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; box-shadow: {card_shadow};">
+                            <div>
+                                <div style="font-size: 15px; font-weight: 600; color: {text_main};">{icon} {fname}</div>
+                                <div style="font-size: 12px; color: {text_sub}; margin-top: 3px;">格式: {badge_type} ｜ 大小: {size_kb} KB</div>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    mime = (
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        if is_docx
+                        else (
+                            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                            if is_pptx
+                            else "application/octet-stream"
+                        )
+                    )
+                    st.download_button(
+                        label=f"⬇️ 立即下载 {fname}",
+                        data=fdata,
+                        file_name=fname,
+                        mime=mime,
+                        key=f"dl_btn_{st.session_state.current_session_id}_{item['id']}",
+                        use_container_width=True,
+                        type="primary",
+                    )
+
+        with tab_council:
+            st.markdown("### 👥 专家顾问团队成员名录")
+            st.caption("GenSlide AI 写作工作台联合业界专家顾问，提供各细分领域的专业能力支撑：")
+
+            for exp in all_experts:
+                is_current = exp.id == current_expert.id
+                border_style = (
+                    "border: 1.5px solid #0071e3; box-shadow: 0 4px 18px rgba(0, 113, 227, 0.15);"
+                    if is_current
+                    else f"border: 1px solid {card_border};"
+                )
+                current_tag = '<span style="background: #0071e3; color: white; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600;">🟢 当前坐镇</span>' if is_current else ""
+                t_html = " ".join(
+                    f'<span style="background: {tag_bg}; color: {text_main}; border: 1px solid {tag_border}; border-radius: 4px; padding: 2px 8px; font-size: 10px; font-weight: 500;">{t}</span>'
+                    for t in exp.tags
+                )
+
+                st.markdown(
+                    f"""
+                    <div style="background: {card_bg}; {border_style} border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; box-shadow: {card_shadow};">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span style="font-size: 24px;">{exp.avatar}</span>
+                                <div>
+                                    <strong style="font-size: 14px; color: {text_main};">{exp.name}</strong>
+                                    <div style="font-size: 11px; color: {text_sub};">{exp.title}</div>
+                                </div>
+                            </div>
+                            <div>{current_tag}</div>
+                        </div>
+                        <div style="font-size: 12px; color: {text_caption}; margin-top: 8px; line-height: 1.5;">
+                            {exp.intro}
+                        </div>
+                        <div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px;">
+                            {t_html}
+                        </div>
                     </div>
-                    <div style="font-size: 12px; color: {text_caption}; margin-top: 8px; line-height: 1.5;">
-                        {exp.intro}
-                    </div>
-                    <div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px;">
-                        {t_html}
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+
+save_session(st.session_state)

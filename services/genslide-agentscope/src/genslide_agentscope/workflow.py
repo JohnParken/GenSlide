@@ -1,12 +1,14 @@
 """Bounded guided authoring. Models suggest content; code owns transitions."""
 import json
-import re
 import uuid
-from pydantic import Field, ValidationError
+from pydantic import Field
 from .domain import (ExecuteRequest, Memory, WorkResult, Content, Guidance, Outline,
                      OutlineNode, Proposal, Section, ServiceError, StrictModel,
                      confirmation_hash, content_hash)
 from .skills import SkillRegistry
+from .authoring import (CHARS_PER_SECTION, GENERATE_BATCH_SECTIONS, explicit_length, length_target, _band,
+                        requirements_block, outline_scale_hint, generation_budget,
+                        generate_sections as _generate_sections)
 
 class Discussion(StrictModel):
     requirements: dict[str, str] = Field(default_factory=dict)
@@ -16,10 +18,6 @@ class Discussion(StrictModel):
 class OutlineAnswer(StrictModel):
     title: str = Field(min_length=1, max_length=200)
     nodes: list[OutlineNode] = Field(min_length=1, max_length=30)
-
-class SectionBatch(StrictModel):
-    """One generate batch: only the sections the current call was asked to write."""
-    sections: list[Section] = Field(min_length=1, max_length=8)
 
 class RevisedSections(StrictModel):
     """Only the sections a revise_content call was asked to rewrite."""
@@ -48,101 +46,10 @@ Keep only concrete facts: names, numbers, dates, units, decisions, responsibilit
 Copy numbers, units and proper nouns verbatim; never turn an opinion into a claim and never invent.
 Drop greetings, boilerplate and formatting noise. Return at most 40 short bullet facts."""
 
-# Rough characters of body text each outline section is expected to carry.
-CHARS_PER_SECTION = 900
-# Sections per generate call: small enough to keep one failure contained, large enough to
-# preserve local coherence.
-GENERATE_BATCH_SECTIONS = 4
 DEFAULT_INPUT_BUDGET = 60_000
 MATERIAL_CHUNK_CHARS = 15_000
 MAX_MATERIAL_CHUNKS = 8
 MAX_RETAINED_MEMORY_BYTES = 32_768
-_LENGTH_NUMBER = re.compile(r"(\d+(?:\.\d+)?)\s*(万|w|k|千)?", re.IGNORECASE)
-_EXPLICIT_LENGTH = re.compile(
-    r"\d[\d.,]*\s*(?:[-–~至]\s*\d[\d.,]*\s*)?(?:万|千|k|w)?\s*字(?:符)?", re.IGNORECASE)
-
-
-def explicit_length(message: str) -> str | None:
-    """Return the user's own verbatim length wording when the message states one.
-
-    The clarify model sometimes omits an explicit length from its requirements. Because the user
-    wrote it literally, adopting that substring cannot violate the no-invented-requirements rule,
-    and the outline scale depends on it.
-    """
-    if not isinstance(message, str):
-        return None
-    for match in _EXPLICIT_LENGTH.finditer(message):
-        candidate = match.group(0).strip()
-        if length_target({"length": candidate}) is not None:
-            return candidate
-    return None
-
-
-def length_target(requirements: dict) -> int | None:
-    """Best-effort conversion of a free-form length requirement into a character target.
-
-    Understands plain counts, thousands markers (千/k/w) and 万, and averages ranges so
-    that "5000-8000字" becomes a target inside the requested band. Page counts such as
-    "3页" are ignored because they are far below any plausible character target.
-    """
-    text = requirements.get("length", "")
-    if not isinstance(text, str) or not text.strip():
-        return None
-    values: list[int] = []
-    for raw, unit in _LENGTH_NUMBER.findall(text):
-        value = float(raw)
-        unit = (unit or "").lower()
-        if unit == "万":
-            value *= 10000
-        elif unit in {"k", "千", "w"}:
-            value *= 1000
-        if 200 <= value <= 100_000:
-            values.append(int(value))
-    if not values:
-        return None
-    return sum(values) // len(values)
-
-
-def _band(target: int) -> str:
-    return f"{round(target * 0.85)}-{round(target * 1.15)}"
-
-
-def requirements_block(requirements: dict) -> str:
-    """Render confirmed requirements as binding instructions rather than background JSON."""
-    if not requirements:
-        return ""
-    listed = "\n".join(f"- {field}: {value}" for field, value in sorted(requirements.items()))
-    return ("Confirmed requirements are binding, not background:\n" + listed + "\n"
-            "- length is a hard budget; self-check the final total before returning.\n"
-            "- audience sets register, terminology depth and how much background is assumed.\n"
-            "- style drives sentence patterns, structure and formatting.\n"
-            "- purpose shapes emphasis and the closing.\n"
-            "- constraints must each be satisfied; if one cannot be met, say so in the affected\n"
-            "  section instead of silently ignoring it.")
-
-
-def outline_scale_hint(requirements: dict) -> str:
-    """Tell the outline model how many sections the confirmed length implies."""
-    target = length_target(requirements)
-    if target is None:
-        return ("Scale: plan a compact outline of 4-8 sections unless the user asked for a "
-                "different scale.")
-    sections = max(3, min(30, round(target / CHARS_PER_SECTION)))
-    return (f"Scale: the confirmed length is about {target} characters, so plan roughly "
-            f"{sections} sections (700-1100 characters each) and keep the finished body within "
-            f"{_band(target)} characters.")
-
-
-def generation_budget(requirements: dict, section_count: int) -> str:
-    """Turn the confirmed length into a per-section budget for the generate stage."""
-    target = length_target(requirements)
-    if target is None or section_count <= 0:
-        return ""
-    return (f"Length is a hard budget: about {target} characters across {section_count} sections, "
-            f"so write about {max(1, target // section_count)} characters per section and keep the "
-            f"whole body within {_band(target)} characters.")
-
-
 def outline_bounds(requirements: dict) -> tuple[int, int] | None:
     """Section-count range implied by the confirmed length, or None when length is unstated.
 
@@ -230,67 +137,6 @@ def _revision_prompt(skill: dict, memory: Memory) -> str:
     ) if part)
 
 
-async def _generate_sections(model, prompt: str, payload: dict, outline: Outline,
-                             materials: str, progress, requirements: dict) -> Content:
-    """Generate the confirmed sections, in bounded batches, retrying only the failed batch."""
-    nodes = outline.nodes
-    batches = [nodes[start:start + GENERATE_BATCH_SECTIONS]
-               for start in range(0, len(nodes), GENERATE_BATCH_SECTIONS)]
-    if progress is not None:
-        await progress("generating_sections", {"batches": len(batches), "sections": len(nodes)})
-    sections: list[Section] = []
-    for index, batch in enumerate(batches, 1):
-        titles = [node.title for node in batch]
-        single = len(batches) == 1
-        if single:
-            section_prompt = prompt
-            request_payload = {**payload, "materials": materials, "schema": Content.model_json_schema()}
-        else:
-            recap = "\n".join(
-                f"- {section.title}: {' '.join(section.body.split())[:120]}" for section in sections[-3:])
-            target = length_target(requirements)
-            share = ""
-            if target:
-                share = (f"This batch of {len(batch)} sections must total about "
-                         f"{max(1, target // len(batches))} characters. The finished body is "
-                         f"{target} characters across {len(nodes)} sections, so do not write more "
-                         f"than this batch's share.")
-            section_prompt = "\n".join(part for part in (
-                prompt,
-                "Write ONLY these sections, in this exact order, with these exact titles:\n"
-                + "\n".join(f"{position}. {title}" for position, title in enumerate(titles, 1)),
-                share,
-                f"Sections already written (do not repeat or rewrite them):\n{recap}" if recap else "",
-            ) if part)
-            request_payload = {**payload, "materials": materials, "section_titles": titles,
-                               "schema": SectionBatch.model_json_schema()}
-        produced: list[Section] = []
-        for attempt in (1, 2):
-            try:
-                raw = await model.complete(section_prompt, request_payload)
-                if raw == {"error": "MATERIAL_OUTLINE_CONFLICT"}:
-                    raise ServiceError("MATERIAL_OUTLINE_CONFLICT")
-                if single:
-                    content = Content.model_validate(raw)
-                    produced = content.sections
-                    if content.title != outline.title:
-                        raise ServiceError("GENERATED_STRUCTURE_MISMATCH", 502)
-                else:
-                    produced = SectionBatch.model_validate(raw).sections
-                if [section.title for section in produced] != titles:
-                    raise ServiceError("GENERATED_STRUCTURE_MISMATCH", 502)
-                break
-            except ServiceError as exc:
-                # Contradicting materials will not improve on retry; a structure miss may.
-                if exc.code == "MATERIAL_OUTLINE_CONFLICT" or attempt == 2:
-                    raise
-            except ValidationError as exc:
-                if attempt == 2:
-                    raise ServiceError("GENERATED_STRUCTURE_MISMATCH", 502) from exc
-        sections.extend(produced)
-        if progress is not None and not single:
-            await progress("generated_sections", {"batch": index, "batches": len(batches)})
-    return Content(title=outline.title, sections=sections)
 
 
 async def execute(request: ExecuteRequest, memory: Memory, materials: str, model,

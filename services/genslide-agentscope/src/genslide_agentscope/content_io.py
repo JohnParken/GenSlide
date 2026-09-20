@@ -55,6 +55,28 @@ def _write_markdown_runs(paragraph, text: str) -> None:
         paragraph.add_run(_plain_markdown(text[position:]))
 
 
+def _markdown_table(lines: list[str]) -> list[list[str]] | None:
+    if len(lines) < 2 or "|" not in lines[0] or not re.match(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$", lines[1]):
+        return None
+    rows = [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in lines]
+    return [rows[0], *rows[2:]] if len(rows) >= 2 else None
+
+
+def _add_markdown_table(document, lines: list[str]) -> None:
+    rows = _markdown_table(lines)
+    if not rows:
+        return
+    table = document.add_table(rows=len(rows), cols=max(len(row) for row in rows))
+    table.style = "Table Grid"
+    for row_index, row in enumerate(rows):
+        for col_index, value in enumerate(row):
+            cell = table.cell(row_index, col_index)
+            cell.text = _plain_markdown(value)
+            if row_index == 0:
+                for run in cell.paragraphs[0].runs:
+                    run.bold = True
+
+
 def write_markdown_body(document, body: str) -> None:
     """Render a section body into Word headings, list paragraphs and prose paragraphs.
 
@@ -66,24 +88,37 @@ def write_markdown_body(document, body: str) -> None:
         lines = [line.strip() for line in block.splitlines() if line.strip()]
         if not lines:
             continue
+        if _markdown_table(lines):
+            _add_markdown_table(document, lines)
+            continue
         heading = _MD_HEADING.match(lines[0])
         if heading:
             document.add_heading(_plain_markdown(heading.group(2)).strip(), level=min(len(heading.group(1)) + 1, 4))
             lines = lines[1:]
             if not lines:
                 continue
-        if _MD_BULLET.match(lines[0]) or _MD_NUMBER.match(lines[0]):
-            for line in lines:
-                bullet, number = _MD_BULLET.match(line), _MD_NUMBER.match(line)
-                marker = bullet or number
+        prose = []
+        for line in lines:
+            bullet, number = _MD_BULLET.match(line), _MD_NUMBER.match(line)
+            marker = bullet or number
+            if marker:
+                if prose:
+                    paragraph = document.add_paragraph()
+                    for index, prose_line in enumerate(prose):
+                        if index:
+                            paragraph.add_run().add_break()
+                        _write_markdown_runs(paragraph, prose_line)
+                    prose = []
                 style = "List Bullet" if bullet else "List Number"
                 _write_markdown_runs(document.add_paragraph(style=style), marker.group(1).strip())
-            continue
-        paragraph = document.add_paragraph()
-        for index, line in enumerate(lines):
-            if index:
-                paragraph.add_run().add_break()
-            _write_markdown_runs(paragraph, line)
+            else:
+                prose.append(line)
+        if prose:
+            paragraph = document.add_paragraph()
+            for index, prose_line in enumerate(prose):
+                if index:
+                    paragraph.add_run().add_break()
+                _write_markdown_runs(paragraph, prose_line)
 
 
 def parse_attachment(path: Path) -> str:
@@ -126,6 +161,8 @@ def parse_attachment(path: Path) -> str:
             raise ValueError("No text could be extracted from the PDF.")
     else:
         from docx import Document
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
 
         try:
             with ZipFile(path) as archive:
@@ -138,10 +175,18 @@ def parse_attachment(path: Path) -> str:
         except BadZipFile as exc:
             raise ValueError("Invalid DOCX archive") from exc
         document = Document(str(path))
-        parts = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
-        for table in document.tables:
-            for row in table.rows:
-                parts.extend(cell.text.strip() for cell in row.cells if cell.text.strip())
+        parts = []
+        for child in document.element.body.iterchildren():
+            if child.tag.endswith("}p"):
+                paragraph = Paragraph(child, document)
+                if paragraph.text.strip():
+                    parts.append(paragraph.text)
+            elif child.tag.endswith("}tbl"):
+                table = Table(child, document)
+                for row in table.rows:
+                    cells = [cell.text.strip() for cell in row.cells]
+                    if any(cells):
+                        parts.append(" | ".join(cells))
         text = "\n\n".join(parts)
         if not text.strip():
             raise ValueError("No text content found in the DOCX file.")
@@ -200,9 +245,22 @@ def render_content(kind: str, content: dict, directory: Path) -> Path:
 
     if kind == "document":
         from docx import Document
+        from docx.shared import Inches, Pt
+        from docx.oxml.ns import qn
 
         output = directory / "document.docx"
         document = Document()
+        for section in document.sections:
+            section.top_margin = Inches(0.7)
+            section.bottom_margin = Inches(0.7)
+            section.left_margin = Inches(0.8)
+            section.right_margin = Inches(0.8)
+        normal = document.styles["Normal"]
+        normal.font.name = "Aptos"
+        normal.font.size = Pt(11)
+        normal.element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+        normal.paragraph_format.line_spacing = 1.35
+        normal.paragraph_format.space_after = Pt(6)
         document.add_heading(title, level=0)
         for section in sections:
             document.add_heading(section["title"], level=1)
@@ -278,14 +336,33 @@ def render_content(kind: str, content: dict, directory: Path) -> Path:
             cleaned = re.sub(r"^(\d+[\.、\)]|[一二三四五六七八九十]+[\.、\)]|[-*•])\s*", "", line).strip()
             if not cleaned:
                 continue
-            m = re.match(r"^([^：:\-—]{2,16})[：:\s\-—]\s*(.+)$", cleaned)
+            m = re.match(r"^([^：:\-—]{2,16})[：:\-—]\s*(.+)$", cleaned)
             if m:
                 items.append((m.group(1).strip(), m.group(2).strip()))
             else:
                 items.append(("", cleaned))
         return items or [("", body_text.strip())]
 
-    total_sections = len(sections)
+    def paginate_items(items):
+        expanded = []
+        for heading, detail in items:
+            if len(detail) <= 40:
+                expanded.append((heading, detail))
+                continue
+            start = 0
+            first = True
+            while start < len(detail):
+                end = min(start + 40, len(detail))
+                if end < len(detail):
+                    split = max(detail.rfind(" ", start, end), detail.rfind("\n", start, end))
+                    if split > start + 16:
+                        end = split
+                expanded.append((heading if first else "", detail[start:end].strip()))
+                first = False
+                start = end
+        return [expanded[index:index + 6] for index in range(0, len(expanded), 6)] or [[("", "")]]
+
+    total_content_pages = sum(len(paginate_items(parse_body(section["body"]))) for section in sections)
 
     # 1. 封面页 (Modern Immersive Dark Cover)
     cover = presentation.slides.add_slide(blank)
@@ -324,7 +401,9 @@ def render_content(kind: str, content: dict, directory: Path) -> Path:
         add_shape(slide, MSO_SHAPE.RECTANGLE, 0.8, 1.25, 8.4, 0.015, C_DIVIDER)
 
         # 内容卡片排版
-        items = parse_body(section["body"])
+        parsed_items = parse_body(section["body"])
+        pages = paginate_items(parsed_items)
+        items = pages[0]
         n = len(items)
 
         if n == 1:
@@ -393,30 +472,45 @@ def render_content(kind: str, content: dict, directory: Path) -> Path:
                     set_para(p0, f"{i+1:02d}  {d}", 12, C_TEXT_MUTED)
 
         else:
-            col_w, gap_x = 4.05, 0.3
-            row_h, gap_y = 0.98, 0.12
-            for i, (h, d) in enumerate(items[:6]):
-                r, c = i // 2, i % 2
-                card_x = 0.8 + c * (col_w + gap_x)
-                card_y = 1.45 + r * (row_h + gap_y)
-                accent_c = C_ACCENT if c == 0 else C_ACCENT_TEAL
-                add_shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, card_x, card_y, col_w, row_h, C_CARD_BG, C_CARD_BORDER)
-                add_shape(slide, MSO_SHAPE.RECTANGLE, card_x, card_y, 0.06, row_h, accent_c)
-                b_item = add_textbox(slide, card_x + 0.2, card_y + 0.08, 3.7, 0.82)
-                p0 = b_item.text_frame.paragraphs[0]
-                if h:
-                    set_para(p0, f"{i+1:02d}  {h}", 13, C_TEXT_DARK, bold=True)
-                    p1 = b_item.text_frame.add_paragraph()
-                    set_para(p1, d, 10.5, C_TEXT_MUTED)
-                else:
-                    set_para(p0, f"{i+1:02d}  {d}", 11, C_TEXT_MUTED)
+            # Dense sections are paginated so every item is retained in a readable card.
+            for page_index, page_items in enumerate(pages):
+                target = slide if page_index == 0 else presentation.slides.add_slide(blank)
+                if page_index:
+                    target.background.fill.solid()
+                    target.background.fill.fore_color.rgb = C_LIGHT_BG
+                    add_shape(target, MSO_SHAPE.ROUNDED_RECTANGLE, 0.8, 0.35, 1.3, 0.24, C_ACCENT_LIGHT)
+                    badge = add_textbox(target, 0.8, 0.35, 1.3, 0.24)
+                    set_para(badge.text_frame.paragraphs[0], f"SECTION {sec_idx:02d}", 9, C_ACCENT, bold=True, align=PP_ALIGN.CENTER)
+                    section_title = add_textbox(target, 0.8, 0.65, 8.4, 0.55)
+                    set_para(section_title.text_frame.paragraphs[0], section["title"], 22, C_TEXT_DARK, bold=True)
+                    add_shape(target, MSO_SHAPE.RECTANGLE, 0.8, 1.25, 8.4, 0.015, C_DIVIDER)
+                for i, (h, d) in enumerate(page_items):
+                    r, c = i // 2, i % 2
+                    card_x = 0.8 + c * 4.35
+                    card_y = 1.45 + r * 0.98
+                    accent_c = C_ACCENT if c == 0 else C_ACCENT_TEAL
+                    add_shape(target, MSO_SHAPE.ROUNDED_RECTANGLE, card_x, card_y, 4.05, 0.98, C_CARD_BG, C_CARD_BORDER)
+                    add_shape(target, MSO_SHAPE.RECTANGLE, card_x, card_y, 0.06, 0.98, accent_c)
+                    box = add_textbox(target, card_x + 0.2, card_y + 0.08, 3.7, 0.82)
+                    para = box.text_frame.paragraphs[0]
+                    set_para(para, f"{i + 1 + page_index * 6:02d}  {h}" if h else f"{i + 1 + page_index * 6:02d}  {d}", 12, C_TEXT_DARK if h else C_TEXT_MUTED, bold=bool(h))
+                    if h:
+                        detail_para = box.text_frame.add_paragraph()
+                        set_para(detail_para, d, 10.5, C_TEXT_MUTED)
+                foot = add_textbox(target, 0.8, 4.95, 6.0, 0.3)
+                set_para(foot.text_frame.paragraphs[0], title, 9.5, C_TEXT_FAINT)
+                page_num = add_textbox(target, 7.6, 4.95, 1.6, 0.3)
+                set_para(page_num.text_frame.paragraphs[0], f"{len(presentation.slides) - 1:02d} / {total_content_pages:02d}", 9.5, C_TEXT_FAINT, align=PP_ALIGN.RIGHT)
+                if section.get("notes"):
+                    target.notes_slide.notes_text_frame.text = _plain_markdown(section["notes"])
+            continue
 
         # Footer
         b_foot_l = add_textbox(slide, 0.8, 4.95, 6.0, 0.3)
         set_para(b_foot_l.text_frame.paragraphs[0], title, 9.5, C_TEXT_FAINT)
 
         b_foot_r = add_textbox(slide, 7.6, 4.95, 1.6, 0.3)
-        set_para(b_foot_r.text_frame.paragraphs[0], f"{sec_idx:02d} / {total_sections:02d}", 9.5, C_TEXT_FAINT, align=PP_ALIGN.RIGHT)
+        set_para(b_foot_r.text_frame.paragraphs[0], f"{len(presentation.slides) - 1:02d} / {total_content_pages:02d}", 9.5, C_TEXT_FAINT, align=PP_ALIGN.RIGHT)
 
         if section.get("notes"):
             slide.notes_slide.notes_text_frame.text = _plain_markdown(section["notes"])

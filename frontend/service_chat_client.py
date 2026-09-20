@@ -29,6 +29,7 @@ class ChatState:
     answer: str = ""
     content: dict[str, Any] | None = None
     artifacts: list[dict[str, Any]] = field(default_factory=list)
+    autonomous_memory: dict[str, Any] = field(default_factory=dict)
 
 
 class ChatClient:
@@ -90,11 +91,15 @@ class ChatClient:
         receipt_ver = receipt.get("session_version") if isinstance(receipt, dict) else None
         state.session_version = result.get("session_version") or receipt_ver or (state.session_version + 1)
         payload = result.get("result", result)
-        state.draft = payload.get("outline") or payload.get("memory", {}).get("outline") or state.draft
-        state.guidance = payload.get("guidance") or payload.get("memory", {}).get("guidance") or state.guidance
-        state.requirements = payload.get("requirements") or payload.get("memory", {}).get("requirements") or state.requirements
+        memory = payload.get("memory") or {}
+        for key, attr in (("outline", "draft"), ("guidance", "guidance"), ("requirements", "requirements")):
+            if key in payload:
+                setattr(state, attr, payload[key])
+            elif key in memory:
+                setattr(state, attr, memory[key])
         state.answer = payload.get("answer", "")
-        state.content = result.get("content")
+        if "content" in result:
+            state.content = result["content"]
         state.artifacts = result.get("files", [])
         return result
 

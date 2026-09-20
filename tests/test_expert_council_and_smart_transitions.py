@@ -102,7 +102,7 @@ class TestSmartModelDrivenTransitions(unittest.TestCase):
 
 class TestFollowUpQuestionsInAutonomousAgent(unittest.TestCase):
     @patch.object(AutonomousAgent, "_call_llm")
-    def test_reply_extracts_3_to_5_follow_up_questions(self, mock_call):
+    def test_reply_caps_follow_up_questions_at_2(self, mock_call):
         mock_call.return_value = '''{
             "thought": "Clarifying requirements with 3-5 structured options",
             "skill": "reply",
@@ -126,7 +126,7 @@ class TestFollowUpQuestionsInAutonomousAgent(unittest.TestCase):
         res = agent.step("我想写一份企业数字化转型战略报告")
         self.assertEqual(res.skill, "reply")
         self.assertIsNotNone(res.follow_up_questions)
-        self.assertEqual(len(res.follow_up_questions), 3)
+        self.assertEqual(len(res.follow_up_questions), 2)
         self.assertEqual(res.follow_up_questions[0]["question"], "1. 报告的主要面向对象是？")
         self.assertEqual(len(res.follow_up_questions[0]["options"]), 3)
 

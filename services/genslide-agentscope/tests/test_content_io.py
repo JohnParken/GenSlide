@@ -119,3 +119,52 @@ def test_render_document_excludes_speaker_notes(tmp_path: Path) -> None:
     content = {"title": "Plan", "sections": [{"title": "Overview", "body": "Details", "notes": "Speak"}]}
     document = Document(render_content("document", content, tmp_path))
     assert "Speak" not in "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+
+def test_render_presentation_paginates_all_items_and_notes(tmp_path: Path) -> None:
+    sections = [{"title": "Items", "body": "\n".join(f"- Item {i}" for i in range(1, 8)), "notes": "Keep"}]
+    deck = Presentation(render_content("presentation", {"title": "Plan", "sections": sections}, tmp_path))
+    assert len(deck.slides) == 4
+    slide_text = "\n".join(shape.text for slide in deck.slides for shape in slide.shapes if shape.has_text_frame)
+    assert all(f"Item {i}" in slide_text for i in range(1, 8))
+    assert all("Keep" in slide.notes_slide.notes_text_frame.text for slide in list(deck.slides)[1:-1])
+
+
+def test_render_presentation_splits_long_items_without_loss(tmp_path: Path) -> None:
+    body = "Long item: " + "word " * 900
+    deck = Presentation(render_content("presentation", {"title": "Plan", "sections": [{"title": "Long", "body": body}]}, tmp_path))
+    rendered = "".join(shape.text for slide in deck.slides for shape in slide.shapes if shape.has_text_frame)
+    assert rendered.count("word") == 900
+    body_boxes = [shape.text for slide in deck.slides for shape in slide.shapes if shape.has_text_frame and "word" in shape.text]
+    assert max(map(len, body_boxes)) <= 60
+
+
+def test_render_document_handles_mixed_prose_and_lists(tmp_path: Path) -> None:
+    from docx import Document
+
+    body = "Intro prose\n- First\n- Second\nClosing prose"
+    document = Document(render_content("document", {"title": "Plan", "sections": [{"title": "Mixed", "body": body}]}, tmp_path))
+    assert [paragraph.text for paragraph in document.paragraphs if paragraph.text] == ["Plan", "Mixed", "Intro prose", "First", "Second", "Closing prose"]
+
+
+def test_render_document_tables_are_editable(tmp_path: Path) -> None:
+    from docx import Document
+
+    body = "| Name | Value |\n| --- | --- |\n| A | 1 |"
+    document = Document(render_content("document", {"title": "Plan", "sections": [{"title": "Table", "body": body}]}, tmp_path))
+    assert len(document.tables) == 1
+    assert [[cell.text for cell in row.cells] for row in document.tables[0].rows] == [["Name", "Value"], ["A", "1"]]
+
+
+def test_parse_docx_preserves_paragraph_table_order_and_cells(tmp_path: Path) -> None:
+    from docx import Document
+
+    source = tmp_path / "ordered.docx"
+    document = Document()
+    document.add_paragraph("Before")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Left"
+    table.cell(0, 1).text = "Right"
+    document.add_paragraph("After")
+    document.save(source)
+    assert parse_attachment(source) == "Before\n\nLeft | Right\n\nAfter"
