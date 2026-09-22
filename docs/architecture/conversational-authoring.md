@@ -61,7 +61,7 @@ Offline regressions:
 
 ```bash
 .venv/bin/python -m pytest -q
-PYTHONPATH=services/genslide-agentscope/src services/genslide-agentscope/.venv/bin/python -m pytest -q services/genslide-agentscope/tests
+PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests
 ```
 
 Inspect the synthetic evaluation cases without calling a model:

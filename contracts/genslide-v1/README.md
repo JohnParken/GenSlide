@@ -1,20 +1,43 @@
-# GenSlide 一期契约源
+# GenSlide assistant 契约源
 
-`execute.schema.json` 是 `ExecuteRequest` 的 JSON Schema；两独立包保有副本，不在运行时依赖本目录。
-schema 或语义变更须同步更新本契约与 `services/genslide-agentscope/contracts/execute.schema.json`，并运行该服务测试。
+本次对 v1 做协调式破坏性升级：公开执行请求使用 `mode=assistant`、`message`、
+`requested_output=auto|text|document|presentation` 和可选 `requested_skill_id`。
+旧 `operation`、大纲确认参数和客户端正文/snapshot 不属于新执行请求。
+停止新请求并排空旧 action 后，同时升级 BFF、服务和调用方。
 
-BFF 编排顺序：稳定幂等键 → 原子准入与授权 → 固定 engine/Pod → 同步 execute → 查权威回执。
-claim 中的 `request_fingerprint` 为完整执行请求（按 Pydantic 默认值补全、排除 authorization）
-的规范 JSON SHA-256：UTF-8、键排序、`ensure_ascii=False`、无额外分隔空白。
-字段包含 message、草稿版本、本轮附件、问题答案、接受的建议等；客户端重试不得更改这些字段。
-请使用各包 `domain.digest` 或完全一致的序列化规则，不对原始 HTTP 字节直接散列。
+## Workspace 边界
 
-接口时间一律带时区的 ISO-8601 UTC。会话与执行状态以 BFF 为准；服务内存仅为可丢失草稿。
-claim 必须绑定整个租户/用户/会话/epoch/action/engine、基础版本及执行实例。
-result 必须原子提交结构化结果、适用文件引用、版本和回执；不能先返回成功再保存。
-无文件写作/澄清/大纲/确认同样需要 result；并发取消与提交必须原子裁决。
-settle 的调用权限和原因必须验证，普通 GET 不关闭操作，关闭后拒绝迟到提交。
+三层架构中，本次只实现执行上下文和临时执行目录。持久用户创作空间、生产 BFF、
+TDSQL 表和清理 worker 仍是后续集成，不由模拟器代替。见
+[执行工作区](../../docs/architecture/execution-workspaces.md)。
 
-内部路由、JSON 字段和联调模拟实现分别见每包 `bff.py`、`mock_bff.py` 及 README。
-文件下载采用 BFF 字节代理；BFF 可以内部使用已有 file_id/长期 URL，不要求本服务直连存储。
-这是一套待真实 BFF 联调确认的实现契约，模拟服务不能证明现有 BFF 已满足原子性要求。
+执行上下文绑定当前身份、action、材料清单、session/lifecycle 版本、租约、截止和 Skill
+版本。模型与 Skill 无权扩大这些授权。每轮可以直接 `reply`、`outline` 或 `deliverable`，
+无需完成固定业务阶段；所有回合按可能生成文件预留资源。
+
+## Public BFF adapter
+
+浏览器使用既有登录/CSRF 保护访问 `POST /api/v1/sessions/{sid}/actions`，
+携带稳定 `Idempotency-Key`，仅提交本轮消息、期望输出、选定 Skill/附件和版本条件。
+BFF 补齐内部身份、action、epoch 和初始授权，转发执行服务。
+`frontend/assistant_client.py` 提供可注入登录 transport 的示例，不内置服务令牌。
+
+内部 claim 必须返回并验证 `lifecycle_version`。快照只能来自 BFF claim，使用严格 schema；
+result 提交时再次检查会话仍有效、生命周期/基础版本和租约。已删除会话的旧回执不能重放。
+本地临时目录不能作为快照或跨实例恢复来源。
+
+## Internal request fingerprint
+
+`execute.schema.json` and the packaged schema must exactly match `ExecuteRequest.model_json_schema()`.
+Claim binds a SHA-256 of the complete request with defaults populated, excluding `authorization`:
+canonical JSON, UTF-8, sorted keys, `ensure_ascii=False`, separators `(',', ':')`.
+Never hash raw HTTP bytes. Retried action IDs must bind the same identity, versions, Skill/output
+intent, message and attachment list. A request ID is tracing metadata, not an idempotency key.
+
+Times are timezone-aware ISO-8601 UTC. All turns, including replies without files, submit a result.
+Result must atomically persist snapshot, optional content, staged file publication and receipt.
+The execution service never connects to TDSQL or private storage directly; its HTTP adapter is
+`backend/genslide_agentscope/bff.py`.
+
+The development mock is not evidence that a production BFF satisfies transaction or authorization
+requirements. Production persistence and per-user public API acceptance remain deferred.

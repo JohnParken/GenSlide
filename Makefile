@@ -32,10 +32,10 @@ test-unit:
 	$(UV) run python -m unittest discover tests -v
 
 test-service:
-	cd services/genslide-agentscope && $(UV) run --locked pytest -q
+	cd backend && $(UV) run --locked pytest -q
 
 run:
-	$(UV) run streamlit run frontend/service_chat.py
+	$(UV) run streamlit run frontend/assistant_demo.py
 
 clean:
 	rm -rf .venv .pytest_cache __pycache__ */__pycache__ */*/__pycache__

@@ -10,7 +10,7 @@
 ## 交付入口
 
 - ~~LangGraph 独立服务：固定 LangGraph 0.6.11。~~（已移除）
-- [AgentScope 独立服务](../../services/genslide-agentscope/README.md)：固定 AgentScope 2.0.7.post1。
+- [AgentScope 独立服务](../../backend/README.md)：固定 AgentScope 2.0.7.post1。
 - [TL 测试代理](../../services/tl-proxy/README.md)：chatbbc 两段式协议转换和公网模型联调。
 - [BFF 契约源](../../contracts/genslide-v1/README.md) 与两包各自的请求 JSON Schema。
 - [完整目标方案](synchronous-multiuser-content-platform.md)：P0–P8 是目标验收范围，不代表所有生产条件已在本机签收。

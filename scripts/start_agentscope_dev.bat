@@ -37,7 +37,7 @@ if %errorlevel% equ 0 (
     echo [2/4] mock_bff 已在端口 8010 运行中。
 ) else (
     echo [2/4] 正在启动 mock_bff (端口 8010)...
-    start "GenSlide - mock_bff (8010)" /min cmd /c "cd /d "%REPO_ROOT%\services\genslide-agentscope" && uv run --locked uvicorn genslide_agentscope.mock_bff:create_mock_bff --factory --host 127.0.0.1 --port 8010"
+    start "GenSlide - mock_bff (8010)" /min cmd /c "cd /d "%REPO_ROOT%\backend" && uv run --locked uvicorn genslide_agentscope.mock_bff:create_mock_bff --factory --host 127.0.0.1 --port 8010"
     timeout /t 2 /nobreak >nul
 )
 
@@ -47,7 +47,7 @@ if %errorlevel% equ 0 (
     echo [3/4] genslide-agentscope API 已在端口 8002 运行中。
 ) else (
     echo [3/4] 正在启动 genslide-agentscope (端口 8002)...
-    start "GenSlide - AgentScope API (8002)" /min cmd /c "cd /d "%REPO_ROOT%\services\genslide-agentscope" && uv run --locked uvicorn genslide_agentscope.api:create_app --factory --host 127.0.0.1 --port 8002"
+    start "GenSlide - AgentScope API (8002)" /min cmd /c "cd /d "%REPO_ROOT%\backend" && uv run --locked uvicorn genslide_agentscope.api:create_app --factory --host 127.0.0.1 --port 8002"
     timeout /t 2 /nobreak >nul
 )
 
@@ -57,7 +57,7 @@ if %errorlevel% equ 0 (
     echo [4/4] Streamlit 前端已在端口 8501 运行中。
 ) else (
     echo [4/4] 正在启动 Streamlit 前端 (端口 8501)...
-    start "GenSlide - Streamlit UI (8501)" /min cmd /c "cd /d "%REPO_ROOT%" && uv run streamlit run frontend\service_chat.py --server.port 8501"
+    start "GenSlide - Streamlit UI (8501)" /min cmd /c "cd /d "%REPO_ROOT%" && uv run streamlit run frontend\assistant_demo.py --server.port 8501"
     timeout /t 2 /nobreak >nul
 )
 

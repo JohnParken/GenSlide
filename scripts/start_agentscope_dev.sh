@@ -50,7 +50,7 @@ if is_port_in_use 8010; then
 else
   echo "➔ [2/4] 正在启动 mock_bff (端口 8010)..."
   (
-    cd "$REPO_ROOT/services/genslide-agentscope"
+    cd "$REPO_ROOT/backend"
     nohup uv run --locked uvicorn genslide_agentscope.mock_bff:create_mock_bff \
       --factory --host 127.0.0.1 --port 8010 > "$LOG_DIR/mock_bff.log" 2>&1 &
   )
@@ -68,7 +68,7 @@ if is_port_in_use 8002; then
 else
   echo "➔ [3/4] 正在启动 genslide-agentscope (端口 8002)..."
   (
-    cd "$REPO_ROOT/services/genslide-agentscope"
+    cd "$REPO_ROOT/backend"
     nohup uv run --locked uvicorn genslide_agentscope.api:create_app \
       --factory --host 127.0.0.1 --port 8002 > "$LOG_DIR/agentscope.log" 2>&1 &
   )
@@ -85,7 +85,7 @@ if is_port_in_use 8501; then
   echo "✔ [4/4] Streamlit 前端已在端口 8501 运行中。"
 else
   echo "➔ [4/4] 正在启动 Streamlit 前端 (端口 8501)..."
-  nohup uv run streamlit run frontend/service_chat.py \
+  nohup uv run streamlit run frontend/assistant_demo.py \
     --server.port 8501 --server.headless true > "$LOG_DIR/streamlit.log" 2>&1 &
   sleep 2
   if is_port_in_use 8501; then

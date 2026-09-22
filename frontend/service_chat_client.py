@@ -30,6 +30,7 @@ class ChatState:
     content: dict[str, Any] | None = None
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     autonomous_memory: dict[str, Any] = field(default_factory=dict)
+    lifecycle_version: int = 1
 
 
 class ChatClient:
@@ -39,6 +40,43 @@ class ChatClient:
         self.token = token
         self.engine = engine
         self.tenant_id, self.user_id, self.timeout = tenant_id, user_id, timeout
+
+    def turn(self, message: str, *, state: ChatState, action_id: str,
+             requested_output="auto", requested_skill_id=None, current_file_ids=None):
+        """Development-only action adapter; callers preserve action_id on retry.
+
+        Production browsers use AssistantClient and the authenticated public BFF.
+        """
+        request = {"api_contract_version": "1", "engine": state.engine,
+                   "tenant_id": self.tenant_id, "user_id": self.user_id,
+                   "session_id": state.session, "runtime_epoch": state.runtime_epoch,
+                   "action_id": action_id, "authorization": self.token,
+                   "expected_session_version": state.session_version,
+                   "expected_lifecycle_version": state.lifecycle_version,
+                   "mode": "assistant", "message": message,
+                   "requested_output": requested_output,
+                   "requested_skill_id": requested_skill_id,
+                   "current_file_ids": list(current_file_ids or [])}
+        begun = self._request(self.bff_url, "dev/begin", payload=request)
+        if begun.get("status") == "committed":
+            stored = begun["result"]
+            result = {"status": "completed", "action_id": action_id,
+                      "session_version": begun["session_version"], "receipt": begun.get("receipt"),
+                      "effect": stored["effect"], "result": stored.get("result", {}),
+                      "content": stored.get("content"), "files": stored.get("files", [])}
+        else:
+            authorized = dict(request)
+            authorized.update(begun.get("request", begun))
+            result = self._request(self.service_url, f"v1/actions/{action_id}/execute", payload=authorized)
+        state.session_version = result["session_version"]
+        payload = result.get("result", {})
+        state.answer = result.get("reply") or payload.get("reply", "")
+        if payload.get("outline") is not None:
+            state.draft = payload["outline"]
+        if result.get("content") is not None:
+            state.content = result["content"]
+        state.artifacts = result.get("files", [])
+        return result
 
     def _request(self, base: str, path: str, *, method="POST", payload=None, raw=None, headers=None):
         data = raw if raw is not None else (json.dumps(payload or {}).encode() if payload is not None else None)

@@ -177,7 +177,7 @@ GenSlide/
 | HTTP / schema / 测试 | 统一采用 FastAPI、Uvicorn、Pydantic、HTTPX 和 pytest 等必要基础库；公共直接依赖尽量锁同一精确版本，各自拥有完整锁文件 |
 | 内容解析与渲染 | `python-pptx`、`python-docx`、`pypdf`、Pillow/lxml 等按真实使用裁剪；同模板、字体及资源哈希，不靠混装旧依赖保持一致 |
 | LangGraph 专属 | 当前固定 `langgraph==0.6.11`，原生 InMemorySaver 参与会话图；不导入旧工程图状态，完整传递依赖独立锁定 |
-| AgentScope 专属 | 固定 `agentscope==2.0.7.post1`，独立版本基线位于 `services/genslide-agentscope/requirements.txt`；P0 验证该版本兼容性，不自动升至其他 2.x 版本。不照搬 1.x 示例，不引入 LangGraph 来模拟其会话 |
+| AgentScope 专属 | 固定 `agentscope==2.0.7.post1`，独立版本基线位于 `backend/requirements.txt`；P0 验证该版本兼容性，不自动升至其他 2.x 版本。不照搬 1.x 示例，不引入 LangGraph 来模拟其会话 |
 | 不纳入一期 | 两包均不主动引入 SQL/ORM/迁移、Redis、旧 Streamlit/Flask 业务入口、gpt4all 本地模型、完整 Runtime/Studio、脚本 sandbox 或无关全量 extras |
 
 当前根 `pyproject.toml` 混合了旧 UI、模型及生成依赖，不能直接复制为两包全部依赖。先验证公共依赖交集，再各自解析锁定；框架传递依赖冲突时允许有据可查的差异，不使用忽略依赖检查或强压不兼容版本。安装框架可能带入未使用的传递包，应在依赖清单中说明；“无数据库依赖”首先指不要求数据库服务、凭据或启动连接，不虚称所有传递依赖完全相同。

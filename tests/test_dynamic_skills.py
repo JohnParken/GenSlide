@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_AGENTSCOPE_SRC = _REPO_ROOT / "services" / "genslide-agentscope" / "src"
+_AGENTSCOPE_SRC = _REPO_ROOT / "backend"
 _FRONTEND_DIR = _REPO_ROOT / "frontend"
 
 for p in [str(_AGENTSCOPE_SRC), str(_FRONTEND_DIR)]:

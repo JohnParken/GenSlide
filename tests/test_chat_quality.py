@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_ROOT, "frontend"))
-sys.path.insert(0, os.path.join(_ROOT, "services", "genslide-agentscope", "src"))
+sys.path.insert(0, os.path.join(_ROOT, "backend"))
 
 from autonomous_agent import AutonomousAgent
 from chat_context import (prepare_history, prepare_materials, relevant_materials,

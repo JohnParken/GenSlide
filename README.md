@@ -1,7 +1,7 @@
 # GenSlide — AgentScope Content Generation Workbench
 
-GenSlide turns user requirements into guided, editable deliverables (Word/WPS documents, PPTX
-decks, and plain writing) through a request-bound, multi-user API backed by
+GenSlide is being migrated to a Skill-driven writing assistant for editable Word/WPS documents,
+PPTX decks and plain writing, through a request-bound, multi-user API backed by
 **AgentScope 2.0.7.post1**.
 
 AgentScope is the **only** engine in this repository. The earlier LangGraph service and the
@@ -13,14 +13,21 @@ original GPT-4o Streamlit pipeline have been removed; see
 ## Architecture
 
 ```
-Streamlit workbench            BFF gateway                AgentScope service            TL proxy
-frontend/service_chat.py  →  mock_bff :8010         →  genslide-agentscope :8002  →  tl-proxy :8089  →  model
-   (expert council,             (request/authorization      (guidance → outline →          (chatbbc two-stage
-    autonomous agent)            checks, session lease)      confirm → render)              RPC → Qwen/DeepSeek)
+Development assistant         BFF gateway                AgentScope service            TL proxy
+frontend/assistant_demo.py → mock_bff :8010         →  genslide-agentscope :8002 → tl-proxy :8089 → model
+   (natural language turns)     (DEV ONLY, in memory)       (Skill → reply/outline/deliverable)
 ```
 
-Each request carries its own authorization and materials; the service keeps no database and no
-Redis. Session state lives in pod memory, so deployments need session affinity.
+Each request carries its own authorization and materials; the execution service keeps no database
+and no Redis. The current change separates an action's authorized execution context from its
+disposable local workspace. Persistent user authoring spaces are deferred to the production BFF.
+See [workspace lifetimes](docs/architecture/execution-workspaces.md) and the
+[future TDSQL MariaDB 10.3 contract](docs/architecture/tdsql-mariadb-10.3-bff-contract.md).
+
+The Streamlit workbench is a development demonstration. It is not a production
+identity or persistence boundary. `frontend/assistant_client.py` defines the user-facing BFF
+adapter for an existing authenticated transport; this repository contains no Vue application or
+production BFF. Do not expose the dev mock to users.
 
 ---
 
@@ -30,11 +37,13 @@ Redis. Session state lives in pod memory, so deployments need session affinity.
 GenSlide/
 ├── frontend/
 │   ├── service_chat.py          # Streamlit workbench (expert council + autonomous mode)
+│   ├── assistant_demo.py        # Current server-side assistant demo (make run)
+│   ├── assistant_client.py      # Public BFF adapter, supplied authenticated transport
 │   ├── service_chat_client.py   # BFF client and session state
 │   ├── autonomous_agent.py      # Free-form agent that drives drafting/rendering
 │   └── expert_council.py        # Expert personas mapped onto skills
+├── backend/                     # The content API (genslide_agentscope, tests, contracts, deploy, Dockerfile)
 ├── services/
-│   ├── genslide-agentscope/     # The content API (src, tests, contracts, deploy, Dockerfile)
 │   └── tl-proxy/                # chatbbc two-stage protocol → Qwen/DeepSeek
 ├── scripts/                     # Local dev stack start/stop + flow check
 ├── tests/                       # Root workbench/agent tests
@@ -74,12 +83,12 @@ Configure `services/tl-proxy/.env` with your `UPSTREAM_*` values first, then:
 cd services/tl-proxy && npm ci && npm run build && npm start
 
 # Mock BFF
-cd services/genslide-agentscope
+cd backend
 uv run --locked uvicorn genslide_agentscope.mock_bff:create_mock_bff \
   --factory --host 127.0.0.1 --port 8010
 
 # AgentScope service
-cd services/genslide-agentscope
+cd backend
 uv run --locked uvicorn genslide_agentscope.api:create_app \
   --factory --host 127.0.0.1 --port 8002
 
@@ -108,14 +117,14 @@ Set `MODEL_PROVIDER=openai` to use an OpenAI-compatible provider instead of the 
 
 ```bash
 make test              # root workbench/agent tests
-make test-service      # genslide-agentscope service suite
+make test-service      # backend service suite
 make test-flow         # end-to-end check against the running dev stack
 ```
 
 The service suite is fully self-contained and runs from its own locked environment:
 
 ```bash
-cd services/genslide-agentscope && uv run --locked pytest -q
+cd backend && uv run --locked pytest -q
 ```
 
 ---
@@ -125,8 +134,8 @@ cd services/genslide-agentscope && uv run --locked pytest -q
 - The root environment intentionally does **not** install the `agentscope` framework. The root
   code imports only `genslide_agentscope` submodules that carry no AgentScope symbols
   (`content_io`, `skills`, `tl_provider`). Install and run the framework inside
-  `services/genslide-agentscope`, which pins `agentscope==2.0.7.post1`.
-- `frontend/autonomous_agent.py` adds `services/genslide-agentscope/src` to `sys.path`, so the
+  `backend`, which pins `agentscope==2.0.7.post1`.
+- `frontend/autonomous_agent.py` adds `backend` to `sys.path`, so the
   workbench and root tests consume the service source directly rather than a second copy.
 - Installing `agentscope` into the root environment is not possible alongside
   `streamlit==1.34.0`: AgentScope requires `protobuf>=5.0,<8.0` through

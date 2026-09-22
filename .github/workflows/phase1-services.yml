@@ -1,9 +1,9 @@
 name: GenSlide CI
 on:
   push:
-    paths: ['services/**', 'frontend/**', 'tests/**', 'scripts/**', 'pyproject.toml', 'uv.lock', '.github/workflows/phase1-services.yml']
+    paths: ['backend/**', 'services/**', 'frontend/**', 'tests/**', 'scripts/**', 'pyproject.toml', 'uv.lock', '.github/workflows/phase1-services.yml']
   pull_request:
-    paths: ['services/**', 'frontend/**', 'tests/**', 'scripts/**', 'pyproject.toml', 'uv.lock', '.github/workflows/phase1-services.yml']
+    paths: ['backend/**', 'services/**', 'frontend/**', 'tests/**', 'scripts/**', 'pyproject.toml', 'uv.lock', '.github/workflows/phase1-services.yml']
 permissions:
   contents: read
 jobs:
@@ -33,11 +33,11 @@ jobs:
           version: '0.10.2'
           python-version: '3.12'
       - run: uv sync --frozen
-        working-directory: services/genslide-agentscope
+        working-directory: backend
       - run: uv run --locked pytest -q
-        working-directory: services/genslide-agentscope
+        working-directory: backend
       - run: uv build
-        working-directory: services/genslide-agentscope
+        working-directory: backend
   workbench:
     runs-on: ubuntu-latest
     steps:

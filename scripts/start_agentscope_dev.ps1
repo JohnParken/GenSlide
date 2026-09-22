@@ -38,7 +38,7 @@ if (Test-PortListening 8010) {
     Write-Host "✔ [2/4] mock_bff 已在端口 8010 运行中。" -ForegroundColor Green
 } else {
     Write-Host "➔ [2/4] 正在启动 mock_bff (端口 8010)..." -ForegroundColor Yellow
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c cd /d `"$RepoRoot\services\genslide-agentscope`" && uv run --locked uvicorn genslide_agentscope.mock_bff:create_mock_bff --factory --host 127.0.0.1 --port 8010" -WindowStyle Minimized
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/c cd /d `"$RepoRoot\backend`" && uv run --locked uvicorn genslide_agentscope.mock_bff:create_mock_bff --factory --host 127.0.0.1 --port 8010" -WindowStyle Minimized
     Start-Sleep -Seconds 2
 }
 
@@ -47,7 +47,7 @@ if (Test-PortListening 8002) {
     Write-Host "✔ [3/4] genslide-agentscope API 已在端口 8002 运行中。" -ForegroundColor Green
 } else {
     Write-Host "➔ [3/4] 正在启动 genslide-agentscope (端口 8002)..." -ForegroundColor Yellow
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c cd /d `"$RepoRoot\services\genslide-agentscope`" && uv run --locked uvicorn genslide_agentscope.api:create_app --factory --host 127.0.0.1 --port 8002" -WindowStyle Minimized
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/c cd /d `"$RepoRoot\backend`" && uv run --locked uvicorn genslide_agentscope.api:create_app --factory --host 127.0.0.1 --port 8002" -WindowStyle Minimized
     Start-Sleep -Seconds 2
 }
 
@@ -56,7 +56,7 @@ if (Test-PortListening 8501) {
     Write-Host "✔ [4/4] Streamlit 前端已在端口 8501 运行中。" -ForegroundColor Green
 } else {
     Write-Host "➔ [4/4] 正在启动 Streamlit 前端 (端口 8501)..." -ForegroundColor Yellow
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c cd /d `"$RepoRoot`" && uv run streamlit run frontend\service_chat.py --server.port 8501" -WindowStyle Minimized
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/c cd /d `"$RepoRoot`" && uv run streamlit run frontend\assistant_demo.py --server.port 8501" -WindowStyle Minimized
     Start-Sleep -Seconds 2
 }
 
