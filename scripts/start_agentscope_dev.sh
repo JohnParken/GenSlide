@@ -32,7 +32,7 @@ if is_port_in_use 8089; then
 else
   echo "➔ [1/4] 正在启动 tl-proxy (端口 8089)..."
   (
-    cd "$REPO_ROOT/services/tl-proxy"
+    cd "$REPO_ROOT/test-tools/tl-proxy"
     npm run build >/dev/null 2>&1 || true
     nohup node dist/src/cli.js > "$LOG_DIR/tl_proxy.log" 2>&1 &
   )

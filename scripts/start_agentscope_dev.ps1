@@ -29,7 +29,7 @@ if (Test-PortListening 8089) {
     Write-Host "✔ [1/4] tl-proxy 已在端口 8089 运行中。" -ForegroundColor Green
 } else {
     Write-Host "➔ [1/4] 正在启动 tl-proxy (端口 8089)..." -ForegroundColor Yellow
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c cd /d `"$RepoRoot\services\tl-proxy`" && npm run build && npm start" -WindowStyle Minimized
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/c cd /d `"$RepoRoot\test-tools\tl-proxy`" && npm run build && npm start" -WindowStyle Minimized
     Start-Sleep -Seconds 2
 }
 

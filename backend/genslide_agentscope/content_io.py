@@ -4,13 +4,14 @@ from pathlib import Path
 import re
 import unicodedata
 from zipfile import ZipFile, BadZipFile
+from .attachment_policy import (SUPPORTED_ATTACHMENT_SUFFIXES, DEFAULT_INPUT_BYTES,
+                                AttachmentTooLarge, MaterialsTooLarge)
 
 MAX_OUTPUT_CHARS = 100_000
-MAX_INPUT_BYTES = 20 * 1024 * 1024
+MAX_INPUT_BYTES = DEFAULT_INPUT_BYTES
 MAX_DOCX_EXPANDED_BYTES = 50 * 1024 * 1024
 MAX_PDF_PAGES = 200
 MAX_SLIDE_BODY_CHARS = 5_000
-_SUPPORTED_ATTACHMENTS = {".txt", ".md", ".pdf", ".docx"}
 
 
 def _normalize(text: str) -> str:
@@ -121,17 +122,20 @@ def write_markdown_body(document, body: str) -> None:
                 _write_markdown_runs(paragraph, prose_line)
 
 
-def parse_attachment(path: Path) -> str:
+def parse_attachment(path: Path, *, max_input_bytes: int = MAX_INPUT_BYTES,
+                     max_output_chars: int = MAX_OUTPUT_CHARS) -> str:
     """Extract normalized text from a supported attachment within size limits."""
     if not isinstance(path, Path):
         raise TypeError("path must be a pathlib.Path")
     suffix = path.suffix.lower()
-    if suffix not in _SUPPORTED_ATTACHMENTS:
+    if suffix not in SUPPORTED_ATTACHMENT_SUFFIXES:
         raise ValueError(f"Unsupported attachment type: {suffix or '(none)'}")
     if not path.is_file():
         raise FileNotFoundError(f"Attachment not found: {path}")
-    if path.stat().st_size > MAX_INPUT_BYTES:
-        raise ValueError(f"Attachment exceeds the {MAX_INPUT_BYTES}-byte input limit")
+    if max_input_bytes <= 0 or max_output_chars < 0:
+        raise ValueError("Invalid attachment limits")
+    if path.stat().st_size > max_input_bytes:
+        raise AttachmentTooLarge(f"Attachment exceeds the {max_input_bytes}-byte input limit")
 
     if suffix in {".txt", ".md"}:
         try:
@@ -152,8 +156,8 @@ def parse_attachment(path: Path) -> str:
         for page in reader.pages:
             extracted = page.extract_text() or ""
             total_chars += len(extracted)
-            if total_chars > MAX_OUTPUT_CHARS:
-                raise ValueError(f"Extracted text exceeds the {MAX_OUTPUT_CHARS}-character limit")
+            if total_chars > max_output_chars:
+                raise MaterialsTooLarge(f"Extracted text exceeds the {max_output_chars}-character limit")
             if extracted:
                 parts.append(extracted)
         text = "\n\n".join(parts)
@@ -192,8 +196,8 @@ def parse_attachment(path: Path) -> str:
             raise ValueError("No text content found in the DOCX file.")
 
     normalized = _normalize(text)
-    if len(normalized) > MAX_OUTPUT_CHARS:
-        raise ValueError(f"Extracted text exceeds the {MAX_OUTPUT_CHARS}-character limit")
+    if len(normalized) > max_output_chars:
+        raise MaterialsTooLarge(f"Extracted text exceeds the {max_output_chars}-character limit")
     return normalized
 
 

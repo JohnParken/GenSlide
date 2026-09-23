@@ -59,6 +59,8 @@ spec:
               value: production
             - name: GENSLIDE_WORKSPACE_ROOT
               value: /tmp/genslide-workspaces
+            - name: GENSLIDE_WORKSPACE_REQUEST_MAX_BYTES
+              value: "134217728" # 128 MiB; application check, not a per-request hard quota
           envFrom:
             - secretRef:
                 name: genslide-agentscope-config
@@ -81,5 +83,7 @@ spec:
               mountPath: /tmp
       volumes:
         - name: temporary
+          # Retained across container restart; orphan sweep is required after SIGKILL.
+          # Pod deletion removes this volume. Keep its budget above application limits.
           emptyDir:
             sizeLimit: 512Mi

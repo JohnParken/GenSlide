@@ -31,7 +31,7 @@ class Workspace:
     _lock_file: object
 
     def check_usage(self) -> DiskUsage:
-        return self._manager.check_usage()
+        return self._manager.check_usage(self.path)
 
     def cleanup(self) -> None:
         self._manager._cleanup(self)
@@ -42,9 +42,11 @@ class WorkspaceManager:
     _LOCK = ".workspace.lock"
     _FAILURES = ".cleanup-failures.log"
 
-    def __init__(self, root: Path | str, max_bytes: int, min_free_bytes: int, stale_seconds: float):
+    def __init__(self, root: Path | str, max_bytes: int, min_free_bytes: int, stale_seconds: float,
+                 *, request_max_bytes: int = 128 * 1024 * 1024):
         self.root = Path(root).absolute()
         self.max_bytes = max(0, int(max_bytes))
+        self.request_max_bytes = max(0, int(request_max_bytes))
         self.min_free_bytes = max(0, int(min_free_bytes))
         self.stale_seconds = float(stale_seconds)
         current = Path(self.root.anchor)
@@ -60,19 +62,27 @@ class WorkspaceManager:
             raise ServiceError("WORKSPACE_INVALID", 500)
         os.chmod(self.root, 0o700)
 
-    def check_usage(self) -> DiskUsage:
+    def check_usage(self, request_path: Path | None = None) -> DiskUsage:
         usage = shutil.disk_usage(self.root)
+        if request_path is not None and (not self._owned(request_path) or request_path.is_symlink()):
+            raise ServiceError("WORKSPACE_INVALID", 500)
         used = 0
+        request_used = 0
         for base, dirs, files in os.walk(self.root, followlinks=False):
             dirs[:] = [d for d in dirs if not (Path(base, d).is_symlink())]
             for name in files:
                 path = Path(base, name)
                 try:
                     if not path.is_symlink():
-                        used += path.stat().st_size
+                        size = path.stat().st_size
+                        used += size
+                        if request_path is not None and path.is_relative_to(request_path):
+                            request_used += size
                 except OSError:
                     continue
         result = DiskUsage(used, usage.free)
+        if request_used > self.request_max_bytes:
+            raise ServiceError("WORKSPACE_REQUEST_CAPACITY", 507)
         if result.used_bytes > self.max_bytes or result.free_bytes < self.min_free_bytes:
             raise ServiceError("WORKSPACE_CAPACITY", 507)
         return result

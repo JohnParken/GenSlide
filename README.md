@@ -58,7 +58,7 @@ GenSlide/
 ### Prerequisites
 
 - Python 3.12 (`uv` manages environments)
-- Node.js 22 for `services/tl-proxy`
+- Node.js 22 for `test-tools/tl-proxy`
 
 ### Start the whole dev stack
 
@@ -76,11 +76,11 @@ The script writes logs to `.logs/` and reuses any component already listening on
 
 ### Start components manually
 
-Configure `services/tl-proxy/.env` with your `UPSTREAM_*` values first, then:
+Configure `test-tools/tl-proxy/.env` with your `UPSTREAM_*` values first, then:
 
 ```bash
 # TL proxy
-cd services/tl-proxy && npm ci && npm run build && npm start
+cd test-tools/tl-proxy && npm ci && npm run build && npm start
 
 # Mock BFF
 cd backend

@@ -168,12 +168,11 @@ Each value must be a verbatim substring of the CURRENT user message; never infer
     except Exception as exc:
         raise ServiceError("MODEL_OUTPUT_INVALID", 502) from exc
     kind = decision.target_kind
-    if set(decision.requirement_updates) - FIELDS or any(
-        not value.strip() or len(value) > 2000 or value not in request.message
-        for value in decision.requirement_updates.values()
-    ):
-        raise ServiceError("UNSUPPORTED_REQUIREMENT_UPDATE", 422)
-    memory.requirements.update(decision.requirement_updates)
+    valid_updates = {
+        k: v for k, v in decision.requirement_updates.items()
+        if k in FIELDS and v.strip() and len(v) <= 2000 and v in request.message
+    }
+    memory.requirements.update(valid_updates)
     if request.requested_output != "auto" and kind != _OUTPUT_KIND[request.requested_output]:
         raise ServiceError("OUTPUT_INTENT_MISMATCH", 422)
     selected = request.requested_skill_id or decision.skill_id

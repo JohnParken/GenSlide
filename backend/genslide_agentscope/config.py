@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 import tempfile
 from urllib.parse import urlsplit
+from .attachment_policy import DEFAULT_INPUT_BYTES
 
 
 _MODEL_PROVIDERS = frozenset({"openai", "tl"})
@@ -64,7 +65,7 @@ class Settings:
     planning_concurrency: int = 2
     cpu_concurrency: int = 2
     transfer_concurrency: int = 2
-    max_download_bytes: int = 20 * 1024 * 1024
+    max_download_bytes: int = DEFAULT_INPUT_BYTES
     max_total_download_bytes: int = 64 * 1024 * 1024
     max_artifact_bytes: int = 20 * 1024 * 1024
     max_material_chars: int = 100_000
@@ -74,6 +75,7 @@ class Settings:
     max_sessions: int = 100
     workspace_root: str | Path = field(default_factory=lambda: Path(tempfile.gettempdir()).resolve() / "genslide-workspaces")
     workspace_max_bytes: int = 256 * 1024 * 1024
+    workspace_request_max_bytes: int = 128 * 1024 * 1024
     workspace_min_free_bytes: int = 128 * 1024 * 1024
     workspace_stale_seconds: float = 3600.0
     disconnect_poll_seconds: float = 0.25
@@ -111,6 +113,7 @@ class Settings:
             self.max_request_bytes,
             self.max_sessions,
             self.workspace_max_bytes,
+            self.workspace_request_max_bytes,
             self.workspace_min_free_bytes,
             self.workspace_stale_seconds,
             self.disconnect_poll_seconds,
@@ -183,7 +186,7 @@ class Settings:
             planning_concurrency=int(_number("GENSLIDE_PLANNING_CONCURRENCY", "2", integer=True)),
             cpu_concurrency=int(_number("GENSLIDE_CPU_CONCURRENCY", "2", integer=True)),
             transfer_concurrency=int(_number("GENSLIDE_TRANSFER_CONCURRENCY", "2", integer=True)),
-            max_download_bytes=int(_number("GENSLIDE_MAX_DOWNLOAD_BYTES", str(20 * 1024 * 1024), integer=True)),
+            max_download_bytes=int(_number("GENSLIDE_MAX_DOWNLOAD_BYTES", str(DEFAULT_INPUT_BYTES), integer=True)),
             max_total_download_bytes=int(_number("GENSLIDE_MAX_TOTAL_DOWNLOAD_BYTES", str(64 * 1024 * 1024), integer=True)),
             max_artifact_bytes=int(_number("GENSLIDE_MAX_ARTIFACT_BYTES", str(20 * 1024 * 1024), integer=True)),
             max_material_chars=int(_number("GENSLIDE_MAX_MATERIAL_CHARS", "100000", integer=True)),
@@ -196,6 +199,7 @@ class Settings:
                 str(Path(tempfile.gettempdir()).resolve() / "genslide-workspaces"),
             )),
             workspace_max_bytes=int(_number("GENSLIDE_WORKSPACE_MAX_BYTES", str(256 * 1024 * 1024), integer=True)),
+            workspace_request_max_bytes=int(_number("GENSLIDE_WORKSPACE_REQUEST_MAX_BYTES", str(128 * 1024 * 1024), integer=True)),
             workspace_min_free_bytes=int(_number("GENSLIDE_WORKSPACE_MIN_FREE_BYTES", str(128 * 1024 * 1024), integer=True)),
             workspace_stale_seconds=float(_number("GENSLIDE_WORKSPACE_STALE_SECONDS", "3600")),
             disconnect_poll_seconds=float(_number("GENSLIDE_DISCONNECT_POLL_SECONDS", "0.25")),

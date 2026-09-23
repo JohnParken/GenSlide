@@ -27,7 +27,7 @@ if %errorlevel% equ 0 (
     echo [1/4] tl-proxy 已在端口 8089 运行中。
 ) else (
     echo [1/4] 正在启动 tl-proxy (端口 8089)...
-    start "GenSlide - tl-proxy (8089)" /min cmd /c "cd /d "%REPO_ROOT%\services\tl-proxy" && npm run build && npm start"
+    start "GenSlide - tl-proxy (8089)" /min cmd /c "cd /d "%REPO_ROOT%\test-tools\tl-proxy" && npm run build && npm start"
     timeout /t 2 /nobreak >nul
 )
 

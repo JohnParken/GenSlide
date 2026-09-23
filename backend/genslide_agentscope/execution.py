@@ -17,6 +17,8 @@ from .config import Settings
 from .domain import (Content, ExecuteRequest, Memory, ServiceError, WorkResult,
                      memory_from_snapshot, snapshot_from_memory)
 from .workspace import Workspace, WorkspaceManager
+from .attachment_policy import (SUPPORTED_ATTACHMENT_SUFFIXES, DEFAULT_INPUT_BYTES,
+                                AttachmentTooLarge, MaterialsTooLarge)
 
 
 class Engine(Protocol):
@@ -59,6 +61,7 @@ class PreparedExecution:
     cancel_after_commit: bool = False
     settled: bool = False
     released: bool = False
+    failure_cleaned: bool = False
     sequence: int = 0
 
 
@@ -82,10 +85,30 @@ class ExecutionContext:
     max_material_bytes: int
     max_artifact_bytes: int
     max_snapshot_bytes: int
+    max_workspace_bytes: int
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _finish_cleanup(awaitable: Awaitable[Any]) -> Any:
+    """Join cleanup even under repeated cancellation, then propagate cancellation.
+
+    Shield alone is insufficient: its caller must retain and join the task before
+    relinquishing ownership of files, subprocesses or admission slots.
+    """
+    task = asyncio.ensure_future(awaitable)
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+    result = task.result()
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
 
 
 async def _terminate_process(process: asyncio.subprocess.Process) -> None:
@@ -137,7 +160,11 @@ def _cpu_worker() -> int:
         if stage == "parse_attachment":
             from .content_io import parse_attachment
 
-            value = parse_attachment(Path(request["path"]))
+            value = parse_attachment(
+                Path(request["path"]),
+                max_input_bytes=request.get("max_input_bytes", DEFAULT_INPUT_BYTES),
+                max_output_chars=request.get("max_output_chars", 100_000),
+            )
         elif stage == "render_content":
             from .content_io import render_content
 
@@ -147,6 +174,10 @@ def _cpu_worker() -> int:
             return 2
         print(json.dumps({"ok": True, "value": value}, ensure_ascii=False))
         return 0
+    except (AttachmentTooLarge, MaterialsTooLarge) as exc:
+        code = "ATTACHMENT_TOO_LARGE" if isinstance(exc, AttachmentTooLarge) else "MATERIALS_TOO_LARGE"
+        print(json.dumps({"ok": False, "code": code}))
+        return 1
     except FileNotFoundError:
         print(json.dumps({"ok": False, "code": "ATTACHMENT_UNAVAILABLE"}))
         return 1
@@ -199,15 +230,16 @@ async def run_cpu_stage(
         except (OSError, ValueError) as exc:
             raise ServiceError("CPU_STAGE_UNAVAILABLE", 503) from exc
         communicate = asyncio.create_task(process.communicate(input=request))
+        async def stop_child():
+            await _terminate_process(process)
+            await asyncio.gather(communicate, return_exceptions=True)
         try:
             stdout, _ = await asyncio.wait_for(asyncio.shield(communicate), timeout=timeout)
         except asyncio.TimeoutError as exc:
-            await _terminate_process(process)
-            await asyncio.gather(communicate, return_exceptions=True)
+            await _finish_cleanup(stop_child())
             raise ServiceError("DEADLINE_EXCEEDED", 504) from exc
         except asyncio.CancelledError:
-            await _terminate_process(process)
-            await asyncio.gather(communicate, return_exceptions=True)
+            await _finish_cleanup(stop_child())
             raise
         if process.returncode != 0:
             try:
@@ -215,6 +247,8 @@ async def run_cpu_stage(
             except (ValueError, TypeError):
                 response = {}
             code = response.get("code") if isinstance(response, dict) else None
+            if code in {"ATTACHMENT_TOO_LARGE", "MATERIALS_TOO_LARGE"}:
+                raise ServiceError(code, 413)
             if code not in {"ATTACHMENT_UNAVAILABLE", "ATTACHMENT_INVALID", "CPU_STAGE_UNSUPPORTED"}:
                 code = "CPU_STAGE_FAILED"
             status = 422 if code == "ATTACHMENT_INVALID" else 503 if code != "ATTACHMENT_UNAVAILABLE" else 404
@@ -242,11 +276,13 @@ class ExecutionRuntime:
         self._active = {"generation": 0, "planning": 0}
         self._metadata: dict[str, SessionMetadata] = {}
         self._reserved_new: set[str] = set()
+        self._evictions: dict[str, asyncio.Task[None]] = {}
         self._cpu_slots = asyncio.Semaphore(settings.cpu_concurrency)
         self._transfer_slots = asyncio.Semaphore(settings.transfer_concurrency)
         self._workspaces = WorkspaceManager(
             settings.workspace_root, settings.workspace_max_bytes,
             settings.workspace_min_free_bytes, settings.workspace_stale_seconds,
+            request_max_bytes=settings.workspace_request_max_bytes,
         )
 
     async def prepare(self, request: ExecuteRequest) -> PreparedExecution:
@@ -300,14 +336,20 @@ class ExecutionRuntime:
                     instance_id, request.runtime_epoch, claim.session_version, claim.lifecycle_version,
                     tuple(request.current_file_ids), deadline, self.settings.max_total_download_bytes,
                     self.settings.max_artifact_bytes, self.settings.max_snapshot_bytes,
+                    self.settings.workspace_request_max_bytes,
                 ),
                 reserved_new_session=(not claim.runtime_initialized),
             )
         except BaseException:
             # A known claim must be closed if local validation prevents execution.
-            if "claim" in locals() and isinstance(claim, Claim):
-                await self._settle_raw(request, claim, instance_id, "execution_failed")
-            await self._release_key(key, bucket)
+            known_claim = locals().get("claim")
+            async def abandon():
+                try:
+                    if isinstance(known_claim, Claim):
+                        await self._settle_raw(request, known_claim, instance_id, "execution_failed")
+                finally:
+                    await self._release_key(key, bucket)
+            await _finish_cleanup(abandon())
             raise
 
     async def accepted_event(self, execution: PreparedExecution) -> dict[str, Any]:
@@ -321,9 +363,13 @@ class ExecutionRuntime:
 
     async def cancel_prepared(self, execution: PreparedExecution) -> None:
         """Close a claimed SSE request if its consumer disconnects before execution starts."""
-        if not execution.committed and not execution.settled:
-            await self._settle_execution(execution, "client_disconnected")
-        await self._release(execution)
+        async def abandon():
+            try:
+                if not execution.committed and not execution.settled:
+                    await self._settle_execution(execution, "client_disconnected")
+            finally:
+                await self._release(execution)
+        await _finish_cleanup(abandon())
 
     async def perform(
         self,
@@ -353,7 +399,7 @@ class ExecutionRuntime:
             async def monitor_workspace():
                 while True:
                     await asyncio.sleep(0.5)
-                    await asyncio.to_thread(self._check_workspace, workspace)
+                    await _finish_cleanup(asyncio.to_thread(self._check_workspace, workspace))
             workspace_task = asyncio.create_task(monitor_workspace())
             watched: set[asyncio.Task[Any]] = {work_task, renew_task, workspace_task}
             if is_disconnected is not None:
@@ -422,18 +468,27 @@ class ExecutionRuntime:
             await self._emit(execution, emit, "error", {"code": error.code, "status": error.status})
             raise error from exc
         finally:
-            for task in (renew_task, disconnect_task, workspace_task):
-                if task is not None and not task.done():
-                    task.cancel()
-            await asyncio.gather(*(t for t in (renew_task, disconnect_task, workspace_task) if t is not None), return_exceptions=True)
-            if workspace is not None:
+            async def finalize():
                 try:
-                    workspace.cleanup()
-                except BaseException:
-                    # Cleanup failures are logged and the manager's sweep can retry;
-                    # never mask a committed BFF result or leak admission ownership.
-                    pass
-            await self._release(execution)
+                    if work_task is not None:
+                        await self._cancel_work(work_task)
+                    tasks = [t for t in (renew_task, disconnect_task, workspace_task) if t is not None]
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    if not execution.committed:
+                        await self._cleanup_failed(execution, "execution_failed")
+                finally:
+                    try:
+                        if workspace is not None:
+                            workspace.cleanup()
+                    except Exception:
+                        # The manager logs failures and retains metadata for sweeping.
+                        pass
+                    finally:
+                        await self._release(execution)
+            await _finish_cleanup(finalize())
 
     async def _pipeline(
         self, execution: PreparedExecution, workspace: Workspace, emit: EventSink | None
@@ -455,7 +510,8 @@ class ExecutionRuntime:
             await self._emit_progress(execution, emit, "parsing_materials")
             parsed = await run_cpu_stage(
                 "parse_attachment",
-                {"path": str(path)},
+                {"path": str(path), "max_input_bytes": self.settings.max_download_bytes,
+                 "max_output_chars": self.settings.max_material_chars},
                 slots=self._cpu_slots,
                 timeout=self._remaining(execution),
             )
@@ -589,7 +645,7 @@ class ExecutionRuntime:
             path.relative_to(workspace.resolve())
         except ValueError as exc:
             raise ServiceError("BFF_CONTRACT_ERROR", 502) from exc
-        if path.suffix.lower() not in {".txt", ".md", ".pdf", ".docx"} or not path.is_file():
+        if path.suffix.lower() not in SUPPORTED_ATTACHMENT_SUFFIXES or not path.is_file():
             raise ServiceError("ATTACHMENT_TYPE_UNSUPPORTED", 415)
         try:
             size = path.stat().st_size
@@ -794,17 +850,13 @@ class ExecutionRuntime:
             expired = [
                 session_key
                 for session_key, metadata in self._metadata.items()
-                if metadata.expires_at <= now and session_key not in self._busy
+                if metadata.expires_at <= now and session_key not in self._busy and session_key not in self._evictions
             ]
             for session_key in expired:
-                try:
-                    await self.engine.delete(session_key)
-                except BaseException:
-                    # Remove the inaccessible entry locally; a future claim will
-                    # fail closed if the engine retained any stale state.
-                    pass
-                self._metadata.pop(session_key, None)
-            if key in self._busy:
+                # Tombstone until deletion has finished; another admission must
+                # not restore this key while its old cache is being removed.
+                self._evictions[session_key] = asyncio.create_task(self._evict(session_key))
+            if key in self._busy or key in self._evictions:
                 raise ServiceError("SESSION_BUSY", 409)
             limit = (
                 self.settings.generation_concurrency if bucket == "generation" else self.settings.planning_concurrency
@@ -814,6 +866,16 @@ class ExecutionRuntime:
             self._busy.add(key)
             self._active[bucket] += 1
 
+    async def _evict(self, key: str) -> None:
+        try:
+            await asyncio.wait_for(self.engine.delete(key), self.settings.control_timeout_seconds)
+        except Exception:
+            pass
+        finally:
+            async with self._lock:
+                self._metadata.pop(key, None)
+                self._evictions.pop(key, None)
+
     async def _release_key(self, key: str, bucket: str) -> None:
         async with self._lock:
             if key in self._busy:
@@ -822,10 +884,16 @@ class ExecutionRuntime:
             self._reserved_new.discard(key)
 
     async def _release(self, execution: PreparedExecution) -> None:
-        if execution.released:
-            return
-        execution.released = True
-        await self._release_key(execution.key, execution.bucket)
+        async def release():
+            async with self._lock:
+                if execution.released:
+                    return
+                if execution.key in self._busy:
+                    self._busy.remove(execution.key)
+                    self._active[execution.bucket] = max(0, self._active[execution.bucket] - 1)
+                self._reserved_new.discard(execution.key)
+                execution.released = True
+        await _finish_cleanup(release())
 
     async def _invalidate(self, key: str) -> None:
         async with self._lock:
@@ -837,12 +905,15 @@ class ExecutionRuntime:
             pass
 
     async def _cleanup_failed(self, execution: PreparedExecution, reason: str) -> None:
-        if execution.committed:
-            return
-        if not execution.settled:
-            await self._settle_execution(execution, reason)
-        if execution.engine_started or execution.commit_started:
-            await self._invalidate(execution.key)
+        async def cleanup():
+            if execution.committed or execution.failure_cleaned:
+                return
+            if not execution.settled:
+                await self._settle_execution(execution, reason)
+            if execution.engine_started or execution.commit_started:
+                await self._invalidate(execution.key)
+            execution.failure_cleaned = True
+        await _finish_cleanup(cleanup())
 
     async def _reconcile_unclaimed(self, request: ExecuteRequest, instance_id: str) -> None:
         task = asyncio.create_task(self.bff.settle(request, None, instance_id, "claim_ack_lost"))
@@ -924,7 +995,7 @@ class ExecutionRuntime:
     async def _cancel_work(self, task: asyncio.Task[Any]) -> None:
         if not task.done():
             task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        await _finish_cleanup(asyncio.gather(task, return_exceptions=True))
 
     def _remaining(self, execution: PreparedExecution) -> float:
         remaining = (execution.deadline_at - _utcnow()).total_seconds()
@@ -977,6 +1048,10 @@ class ExecutionRuntime:
             return
 
     async def aclose(self) -> None:
+        evictions = list(self._evictions.values())
+        for task in evictions:
+            task.cancel()
+        await _finish_cleanup(asyncio.gather(*evictions, return_exceptions=True))
         bff_close = getattr(self.bff, "aclose", None)
         if bff_close is not None:
             await bff_close()

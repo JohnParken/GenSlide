@@ -28,6 +28,7 @@ Contract:
 from __future__ import annotations
 
 import asyncio
+from .attachment_policy import SUPPORTED_ATTACHMENT_SUFFIXES
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -439,7 +440,7 @@ class BFFClient:
                     raise ServiceError("BFF_CONTRACT_ERROR", 502)
                 filename = Path(remote_name.replace("\\", "/")).name
                 suffix = Path(filename).suffix.lower()
-                if suffix not in {".txt", ".md", ".pdf", ".docx"}:
+                if suffix not in SUPPORTED_ATTACHMENT_SUFFIXES:
                     raise ServiceError("ATTACHMENT_TYPE_UNSUPPORTED", 415)
                 content_type = response.headers.get("content-type", "application/octet-stream").split(";", 1)[0]
                 content = bytearray()

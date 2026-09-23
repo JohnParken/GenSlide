@@ -26,12 +26,20 @@ BFF 在后续接入。`mock_bff` 仅模拟可信快照和删除屏障，进程�
 | --- | --- |
 | GENSLIDE_WORKSPACE_ROOT | 系统临时目录下的专属 genslide-workspaces |
 | GENSLIDE_WORKSPACE_MAX_BYTES | 256 MiB，整个管理根目录 |
+| GENSLIDE_WORKSPACE_REQUEST_MAX_BYTES | 128 MiB，单执行目录（含 manifest 与中间文件） |
 | GENSLIDE_WORKSPACE_MIN_FREE_BYTES | 128 MiB |
 | GENSLIDE_WORKSPACE_STALE_SECONDS | 3600 秒；活跃锁持有期间不回收 |
 | GENSLIDE_MAX_SNAPSHOT_BYTES | 2 MiB，正文与轻量记忆单独计量 |
 
-工作目录用量每 0.5 秒检查，部署还须设置临时存储硬限额。API lifespan 每 60 秒以内扫描
-残留目录。详情见 [三层工作区](../../docs/architecture/execution-workspaces.md)。
+工作目录用量每 0.5 秒及阶段边界检查。单请求超限返回 `WORKSPACE_REQUEST_CAPACITY`（507），
+管理根目录总量或剩余空间不足返回 `WORKSPACE_CAPACITY`（507）。这是可超调的应用层检查，
+不是单请求 OS 硬配额；生产部署还须配置专用卷容量及容器临时存储限制，必要时采用文件系统配额。
+API lifespan 每 60 秒以内扫描残留目录。SIGKILL 后通过过期扫描回收；容器重启不会清空
+同一 Pod 的 emptyDir，Pod 删除才会回收该卷。详情见 [三层工作区](../docs/architecture/execution-workspaces.md)。
+
+附件类型由统一策略定义；`GENSLIDE_MAX_DOWNLOAD_BYTES` 同时用于下载与子进程解析，
+大小超限返回 `ATTACHMENT_TOO_LARGE`（413），本轮提取文本超限返回 `MATERIALS_TOO_LARGE`（413）。
+DOCX 解压后 50 MiB 和 PDF 页数限制仍为独立防护，不随下载上限提高而解除。
 
 ## 安装与启动
 
