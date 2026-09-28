@@ -1,7 +1,7 @@
 # GenSlide AgentScope 本地全流程交互联调服务启动脚本 (PowerShell)
 $OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$RepoRoot = Resolve-Path "$PSScriptRoot\.."
+$RepoRoot = Resolve-Path "$PSScriptRoot\..\.."
 Set-Location $RepoRoot
 
 Write-Host "=================================================================" -ForegroundColor Cyan
@@ -68,5 +68,5 @@ Write-Host "  3. AgentScope 服务: http://127.0.0.1:8002"
 Write-Host "  4. 交互测试页面 UI: http://127.0.0.1:8501"
 Write-Host "=================================================================" -ForegroundColor Cyan
 Write-Host "  请在浏览器打开: http://127.0.0.1:8501 开始测试！" -ForegroundColor Green
-Write-Host "  停止服务请运行: .\scripts\stop_agentscope_dev.ps1" -ForegroundColor Yellow
+Write-Host "  停止服务请运行: .\scripts\dev\stop_agentscope_dev.ps1" -ForegroundColor Yellow
 Write-Host "=================================================================" -ForegroundColor Cyan

@@ -2,15 +2,17 @@
 import json
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(_ROOT, "frontend"))
 sys.path.insert(0, os.path.join(_ROOT, "backend"))
 
-from autonomous_agent import AutonomousAgent
-from chat_context import (prepare_history, prepare_materials, relevant_materials,
+from frontend.legacy.autonomous_agent import AutonomousAgent
+from frontend.legacy.chat_context import (prepare_history, prepare_materials, relevant_materials,
                           updated_requirements, RequirementUpdate)
 
 
@@ -98,8 +100,13 @@ class TestAutonomousQuality(unittest.IsolatedAsyncioTestCase):
             {"sections": [{"title": "第5章", "body": "第五章正文", "notes": ""}]},
         ]
         calls = AsyncMock(side_effect=[json.dumps(decision, ensure_ascii=False), *[json.dumps(item, ensure_ascii=False) for item in batches]])
-        with patch.object(AutonomousAgent, "_call_llm", calls):
-            result = await AutonomousAgent().astep("请直接生成纯文本正文")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            skill = Path(tmp_dir) / "writing" / "SKILL.md"
+            skill.parent.mkdir()
+            skill.write_text("---\nname: writing\ndescription: Test writing skill\nmetadata:\n  target_kind: writing\n  supported_outputs: text\n  default_output: text\n---\nTest instructions", encoding="utf-8")
+            with patch.dict(os.environ, {"GENSLIDE_SKILLS_DIR": tmp_dir}):
+                with patch.object(AutonomousAgent, "_call_llm", calls):
+                    result = await AutonomousAgent().astep("请直接生成纯文本正文")
         self.assertEqual([s["title"] for s in result.content["sections"]], [f"第{i}章" for i in range(1, 6)])
         self.assertTrue(result.rendered_file["name"].endswith(".md"))
         self.assertIn("第1章", calls.await_args_list[1].args[1])

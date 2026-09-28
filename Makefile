@@ -6,11 +6,11 @@ help:
 	@echo "GenSlide development commands (powered by uv):"
 	@echo "  make install         - Create virtual environment and install dependencies via uv sync"
 	@echo "  make sync            - Sync all dependencies including dev tools"
-	@echo "  make test            - Run root tests using pytest via uv"
+	@echo "  make test            - Run frontend tests using pytest via uv"
 	@echo "  make test-verbose    - Run tests in verbose mode"
 	@echo "  make test-unit       - Run tests using built-in unittest via uv"
 	@echo "  make test-service    - Run the genslide-agentscope service test suite"
-	@echo "  make run             - Run the Streamlit workbench (frontend/service_chat.py)"
+	@echo "  make run             - Run the current assistant demo (frontend/assistant_demo.py)"
 	@echo "  make clean           - Remove cached files and virtual environment"
 	@echo "  make dev-agentscope  - Start the full local AgentScope dev stack"
 	@echo "  make stop-agentscope - Stop the local AgentScope dev stack"
@@ -29,7 +29,7 @@ test-verbose:
 	$(UV) run pytest -v
 
 test-unit:
-	$(UV) run python -m unittest discover tests -v
+	$(UV) run python -m unittest discover frontend/tests -v
 
 test-service:
 	cd backend && $(UV) run --locked pytest -q
@@ -41,10 +41,10 @@ clean:
 	rm -rf .venv .pytest_cache __pycache__ */__pycache__ */*/__pycache__
 
 dev-agentscope:
-	./scripts/start_agentscope_dev.sh
+	./scripts/dev/start_agentscope_dev.sh
 
 stop-agentscope:
-	./scripts/stop_agentscope_dev.sh
+	./scripts/dev/stop_agentscope_dev.sh
 
 test-flow:
-	$(UV) run ./scripts/test_agentscope_flow.py
+	$(UV) run python scripts/testing/test_agentscope_flow.py

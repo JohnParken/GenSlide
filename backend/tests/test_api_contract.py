@@ -7,6 +7,7 @@ from genslide_agentscope.bff import BFFClient
 from genslide_agentscope.config import Settings
 from genslide_agentscope.engine import Engine
 from genslide_agentscope.mock_bff import create_mock_bff
+from genslide_agentscope.skills import SkillRegistry
 
 TOKEN = "test-internal-token-with-at-least-32-characters"
 
@@ -22,7 +23,7 @@ class Model:
                 "target_kind": "writing", "skill_id": "writing"}
 
 @pytest.mark.asyncio
-async def test_authenticated_api_sse_and_redacted_validation(monkeypatch):
+async def test_authenticated_api_sse_and_redacted_validation(monkeypatch, tmp_path):
     monkeypatch.setenv("GENSLIDE_ALLOW_MOCK", "1")
     monkeypatch.setenv("GENSLIDE_ENV", "test")
     monkeypatch.setenv("GENSLIDE_SERVICE_TOKEN", TOKEN)
@@ -31,7 +32,12 @@ async def test_authenticated_api_sse_and_redacted_validation(monkeypatch):
                                 base_url="http://bff/internal/genslide/v1") as bff_http:
         settings = Settings(environment="test", service_token=TOKEN, bff_url="http://bff/internal/genslide/v1")
         model = Model()
-        app = create_app(settings=settings, bff=BFFClient(settings, bff_http), engine=Engine(model))
+        skill = tmp_path / "writing" / "SKILL.md"
+        skill.parent.mkdir()
+        skill.write_text("---\nname: writing\ndescription: Test writing skill\nmetadata:\n  target_kind: writing\n---\nTest instructions", encoding="utf-8")
+        engine = Engine(model)
+        engine.skills = SkillRegistry(tmp_path)
+        app = create_app(settings=settings, bff=BFFClient(settings, bff_http), engine=engine)
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as client:
                 body = dict(engine="agentscope", tenant_id="t", user_id="u", session_id="s", runtime_epoch="e",

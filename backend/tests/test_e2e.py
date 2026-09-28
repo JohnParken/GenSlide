@@ -8,6 +8,7 @@ from genslide_agentscope.domain import ExecuteRequest, ServiceError
 from genslide_agentscope.engine import Engine
 from genslide_agentscope.execution import ExecutionRuntime
 from genslide_agentscope.mock_bff import create_mock_bff
+from genslide_agentscope.skills import SkillRegistry
 
 TOKEN = "local-test-token-with-more-than-32-characters"
 
@@ -24,11 +25,19 @@ class Model:
                 "deliverable": {"title": "测试写作", "sections": [
                     {"title": "主题介绍", "body": "这是完整正文，用于验证内容生成与交接。", "notes": "讲解主题"}]}}
 
-def app_for(monkeypatch):
+def app_for(monkeypatch, tmp_path):
     monkeypatch.setenv("GENSLIDE_ALLOW_MOCK", "1")
     monkeypatch.setenv("GENSLIDE_ENV", "test")
     monkeypatch.setenv("GENSLIDE_SERVICE_TOKEN", TOKEN)
     return create_mock_bff()
+
+def create_test_skills(tmp_path):
+    root = tmp_path / "skills"
+    for kind in ("writing", "document", "presentation"):
+        path = root / kind / "SKILL.md"
+        path.parent.mkdir(parents=True)
+        path.write_text(f"---\nname: {kind}\ndescription: Test {kind} skill\nmetadata:\n  target_kind: {kind}\n---\nTest instructions", encoding="utf-8")
+    return SkillRegistry(root)
 
 def body(kind="writing", **extra):
     return dict(engine="agentscope", tenant_id="t", user_id="u", session_id="s", runtime_epoch="e",
@@ -39,13 +48,15 @@ def body(kind="writing", **extra):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["writing", "document", "presentation"])
 async def test_real_engine_bff_http_and_artifact_handoff(monkeypatch, tmp_path, kind):
-    app = app_for(monkeypatch)
+    app = app_for(monkeypatch, tmp_path)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://bff/internal/genslide/v1",
                                 headers={"Authorization": "Bearer " + TOKEN}) as http:
         settings = Settings(environment="test", service_token=TOKEN, bff_url=str(http.base_url),
                             workspace_root=tmp_path / "workspaces")
         model = Model(kind)
-        runtime = ExecutionRuntime(BFFClient(settings, http), Engine(model), settings)
+        engine = Engine(model)
+        engine.skills = create_test_skills(tmp_path)
+        runtime = ExecutionRuntime(BFFClient(settings, http), engine, settings)
         data = body(kind)
         response = await http.post("http://bff/dev/begin", json=data)
         assert response.status_code == 200, response.text
@@ -71,14 +82,16 @@ async def test_real_engine_bff_http_and_artifact_handoff(monkeypatch, tmp_path, 
 
 @pytest.mark.asyncio
 async def test_two_pods_unique_claim_and_trusted_snapshot_restore(monkeypatch, tmp_path):
-    app = app_for(monkeypatch)
+    app = app_for(monkeypatch, tmp_path)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://bff/internal/genslide/v1",
                                 headers={"Authorization": "Bearer " + TOKEN}) as http:
         settings = Settings(environment="test", service_token=TOKEN, bff_url=str(http.base_url),
                             workspace_root=tmp_path / "workspaces")
         one, two = Model(), Model()
-        first = ExecutionRuntime(BFFClient(settings, http), Engine(one), settings)
-        second = ExecutionRuntime(BFFClient(settings, http), Engine(two), settings)
+        first_engine, second_engine = Engine(one), Engine(two)
+        first_engine.skills = second_engine.skills = create_test_skills(tmp_path)
+        first = ExecutionRuntime(BFFClient(settings, http), first_engine, settings)
+        second = ExecutionRuntime(BFFClient(settings, http), second_engine, settings)
         async def begin(data):
             response = await http.post("http://bff/dev/begin", json=data)
             assert response.status_code == 200, response.text
@@ -103,12 +116,14 @@ async def test_two_pods_unique_claim_and_trusted_snapshot_restore(monkeypatch, t
 @pytest.mark.asyncio
 @pytest.mark.parametrize("commit_first", [False, True])
 async def test_deletion_blocks_late_commit_and_old_receipt(monkeypatch, tmp_path, commit_first):
-    app = app_for(monkeypatch)
+    app = app_for(monkeypatch, tmp_path)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://bff/internal/genslide/v1",
                                 headers={"Authorization": "Bearer " + TOKEN}) as http:
         settings = Settings(environment="test", service_token=TOKEN, bff_url=str(http.base_url),
                             workspace_root=tmp_path / "workspaces")
-        runtime = ExecutionRuntime(BFFClient(settings, http), Engine(Model()), settings)
+        engine = Engine(Model())
+        engine.skills = create_test_skills(tmp_path)
+        runtime = ExecutionRuntime(BFFClient(settings, http), engine, settings)
         data = body()
         authorized = (await http.post("http://bff/dev/begin", json=data)).json()["request"]
         request = ExecuteRequest.model_validate(authorized)
@@ -129,13 +144,15 @@ async def test_deletion_blocks_late_commit_and_old_receipt(monkeypatch, tmp_path
 
 @pytest.mark.asyncio
 async def test_workspace_creation_failure_settles_and_releases_action(monkeypatch, tmp_path):
-    app = app_for(monkeypatch)
+    app = app_for(monkeypatch, tmp_path)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://bff/internal/genslide/v1",
                                 headers={"Authorization": "Bearer " + TOKEN}) as http:
         settings = Settings(environment="test", service_token=TOKEN, bff_url=str(http.base_url),
                             workspace_root=tmp_path / "workspaces", workspace_max_bytes=1)
         model = Model()
-        runtime = ExecutionRuntime(BFFClient(settings, http), Engine(model), settings)
+        engine = Engine(model)
+        engine.skills = create_test_skills(tmp_path)
+        runtime = ExecutionRuntime(BFFClient(settings, http), engine, settings)
         request = ExecuteRequest.model_validate((await http.post("http://bff/dev/begin", json=body())).json()["request"])
         prepared = await runtime.prepare(request)
         assert prepared.context.current_file_ids == ()

@@ -6,7 +6,7 @@ import sys
 
 from streamlit.testing.v1 import AppTest
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(_ROOT, "frontend"))
 
 
@@ -18,14 +18,14 @@ def _fake_result(message):
 
 
 def test_startup_chat_new_session_and_switch_preserves_messages(tmp_path):
-    import frontend.autonomous_agent as agent_module
+    import frontend.legacy.autonomous_agent as agent_module
     import frontend.service_chat_client as client_module
 
     agent_step = lambda self, message, **kwargs: _fake_result(message)
     with patch.object(client_module.ChatClient, "list_skills", return_value=[
         {"skill_id": "document", "name": "document", "description": "offline", "target_kind": "document", "version": "1", "hash": "x"}
     ]), patch.object(agent_module.AutonomousAgent, "step", agent_step):
-        app = AppTest.from_file("frontend/service_chat.py").run()
+        app = AppTest.from_file("frontend/legacy/service_chat.py").run()
         assert not app.exception
         new_session = next(button for button in app.button if button.label == "➕ 新建会话")
         assert new_session.value is False
@@ -57,7 +57,7 @@ def test_startup_chat_new_session_and_switch_preserves_messages(tmp_path):
 
 
 def test_empty_option_followups_submit_without_crashing():
-    import frontend.autonomous_agent as agent_module
+    import frontend.legacy.autonomous_agent as agent_module
     import frontend.service_chat_client as client_module
 
     def result_with_followups(self, message, **kwargs):
@@ -71,7 +71,7 @@ def test_empty_option_followups_submit_without_crashing():
 
     with patch.object(client_module.ChatClient, "list_skills", return_value=[]), \
          patch.object(agent_module.AutonomousAgent, "step", result_with_followups):
-        app = AppTest.from_file("frontend/service_chat.py").run()
+        app = AppTest.from_file("frontend/legacy/service_chat.py").run()
         app.chat_input[0].set_value("开始规划").run()
         assert not app.exception
         submit = next(button for button in app.button if button.label == "提交补充")

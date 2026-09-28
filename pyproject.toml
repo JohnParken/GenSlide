@@ -5,10 +5,10 @@ description = "GenSlide AI writing workbench and AgentScope content service"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    # Streamlit workbench (frontend/service_chat.py)
+    # Current assistant demo and retained legacy workbench.
     "streamlit==1.34.0",
     "nest_asyncio==1.6.0",
-    # Runtime used by frontend/autonomous_agent.py through genslide_agentscope.
+    # Shared helpers used by frontend/legacy/autonomous_agent.py.
     # Note: genslide_agentscope imports no agentscope symbols in this path, so the
     # agentscope framework itself stays in the service environment only.
     "httpx==0.28.1",
@@ -25,9 +25,9 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["frontend/tests"]
 python_files = ["test_*.py"]
-pythonpath = ["."]
+pythonpath = [".", "backend"]
 
 
 [tool.uv]

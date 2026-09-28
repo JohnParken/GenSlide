@@ -12,7 +12,7 @@
 - 结果为 `reply / outline / deliverable`；用户可直接出稿，不需要先列纲或确认。
 - 每轮先给出结构化决策，再按固定版本的完整 Skill 创作。局部修改由代码合并，保留未修改章节。
 - 只读取本轮授权 TXT/Markdown/PDF/DOCX 附件；快照仅从 BFF claim 恢复，包含有界当前稿，拒绝客户端正文或快照。
-- 内置 5 个只读 Skill，支持完整正文和输出元数据；不执行脚本或访问任意本地目录。
+- 当前内置 `document`、`official-document-skill` 两个 Skill；目标输出需与加载的能力元数据兼容。不执行 Skill 脚本。
 
 ## Workspace 边界与配置
 
@@ -68,11 +68,11 @@ uv run --locked uvicorn genslide_agentscope.api:create_app --factory \
   --host 0.0.0.0 --port 8000 --workers 1 --timeout-graceful-shutdown 45 --no-access-log
 ```
 
-不得增加 ASGI workers；一期状态仅在单进程内。禁止把服务直接暴露到公网。
+每 Pod 保持一个 ASGI worker，本地准入和缓存为单进程状态；已提交内容可从 BFF 快照恢复。禁止直接暴露到公网。
 内部明文 HTTP 只适用于已隔离的可信网络；跨网络须 TLS/mTLS，由平台配置。
 TL 模式通过 `/chatbbc/init_session`、`/chatbbc/chat` 两步协议调用，无轮询、无自动重试。
 可用 `TL_APP_ID`、`TL_TR_CODE`、`TL_TR_VERSION`、`TL_SYSTEM_VARIABLE` 对齐现有网关。
-本地可配合 [`services/tl-proxy`](../tl-proxy/README.md) 联调：
+本地可配合 [`test-tools/tl-proxy`](../test-tools/tl-proxy/README.md) 联调：
 
 ```dotenv
 # 未设置 MODEL_PROVIDER/MODEL_PROTOCOL 时默认使用 TL
@@ -89,11 +89,11 @@ MODEL_NAME=qwen3.8-flash
 
 ## Skill 自动发现
 
-启动时仅扫描包内 `genslide_agentscope/skills/<子目录>/SKILL.md`，
+默认扫描包内 `genslide_agentscope/skills/<子目录>/SKILL.md`，并发现工作目录下存在的 `skills/`，
 按 Markdown frontmatter 的 `name` 注册，不依赖硬编码清单，不递归加载辅助文件。
 JSON skill 不再受支持，遗留 JSON 文件不会被注册；仅含 JSON 的目录会因无有效 skill 而启动失败。
 也可设置 `GENSLIDE_SKILLS_DIR=/absolute/path/to/skills` 指向可信、只读的部署目录；
-指定目录会**替代**包内目录，不自动合并或覆盖。管理员可通过受服务认证保护的
+指定目录会**替代**默认目录；生产建议显式指定可信只读目录，避免工作目录影响发现结果。管理员可通过受服务认证保护的
 `POST /v1/skills/reload` 重载；当前回合使用开始时的注册表副本，不受重载影响。
 
 未指定 ID 时，模型根据目录描述和本轮意图选择；同类编辑优先沿用当前稿 Skill。
@@ -108,8 +108,8 @@ JSON skill 不再受支持，遗留 JSON 文件不会被注册；仅含 JSON 的
 
 ### SKILL.md 格式（唯一支持格式）
 
-内置示例：`genslide_agentscope/skills/business-report/SKILL.md`。
-请求使用 `requested_skill_id="business-report", requested_output="text"`。
+内置示例：`genslide_agentscope/skills/document/SKILL.md`。
+以下 business-report 仅为自定义 Skill 格式示例，不在当前内置目录中；须自行部署后才能指定该 ID。
 
 ```markdown
 ---
@@ -134,7 +134,7 @@ metadata:
 description 参与自动选择；完整正文非空，仍受整个文件 64 KiB 限制。
 可选的 `license`、`compatibility`、`allowed-tools` 仅接收字符串元信息，
 其中 allowed-tools **不授予任何工具执行能力**。YAML 安全加载，拒绝重复键、锚点、
-别名和自定义标签；完整文件内容哈希用于绑定大纲。
+别名和自定义标签；完整文件内容哈希用于绑定本轮 Skill 与当前稿快照。
 `scripts/`、`references/`、`assets/` 不执行、不自动加载。
 这是 SKILL.md 指令格式兼容，不是其他 Agent 产品完整执行环境的兼容。
 
@@ -176,6 +176,8 @@ SSE 包含 `accepted/progress/completed/error`、action_id 及 sequence。
 取消与提交竞态以 BFF 原子结果为准，已提交不可回退为失败。
 
 ## 本地联调（仅模拟）
+
+首次使用请按[本地启动与测试指南](../docs/development/local-testing.md)准备环境、启动组件并验证。
 
 单独终端设置 `GENSLIDE_ENV=development`、`GENSLIDE_ALLOW_MOCK=1`、
 `GENSLIDE_SERVICE_TOKEN`（与 API 一致），运行：

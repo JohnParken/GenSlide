@@ -4,12 +4,12 @@ import sys
 import unittest
 from unittest.mock import patch, MagicMock
 
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(_REPO_ROOT, "frontend"))
 sys.path.insert(0, os.path.join(_REPO_ROOT, "backend"))
 
-from expert_council import get_expert, list_all_experts, ExpertProfile, CORE_EXPERTS
-from autonomous_agent import (
+from frontend.legacy.expert_council import get_expert, list_all_experts, ExpertProfile, CORE_EXPERTS
+from frontend.legacy.autonomous_agent import (
     AutonomousAgent,
     AutonomousResult,
     route_professional_intent,

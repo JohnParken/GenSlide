@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "================================================================="
@@ -103,5 +103,5 @@ echo "  3. AgentScope 服务: http://127.0.0.1:8002"
 echo "  4. 交互测试页面 UI: http://127.0.0.1:8501"
 echo "================================================================="
 echo "  请在浏览器打开: http://127.0.0.1:8501 开始测试！"
-echo "  停止服务请运行: ./scripts/stop_agentscope_dev.sh"
+echo "  停止服务请运行: ./scripts/dev/stop_agentscope_dev.sh"
 echo "================================================================="

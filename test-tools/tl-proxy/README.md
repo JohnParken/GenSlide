@@ -16,17 +16,21 @@ Independent TypeScript/Node.js testing proxy simulating the corporate `chatbbc` 
 ### 1. Installation
 
 ```bash
-cd services/tl-proxy
+cd test-tools/tl-proxy
 npm ci
 npm run build
 ```
 
 ### 2. Configuration
 
-Copy `.env.example` to `.env` or set environment variables:
+Set environment variables (a checked-in `.env.example` is not required):
 
 ```bash
-cp .env.example .env
+export TL_PROXY_HOST=127.0.0.1
+export TL_PROXY_PORT=8089
+export UPSTREAM_PROVIDER=qwen
+export UPSTREAM_API_KEY='replace-with-your-provider-key'
+export LOG_LEVEL=info
 ```
 
 Example `.env` for Qwen (`qwen3.8-flash`):
@@ -67,7 +71,8 @@ npm test
 
 ## Integration with GenSlide
 
-In GenSlide's `.env`, configure the ChatBBC / TL provider to point at `tl-proxy`:
+In the GenSlide service process environment, configure TL to point at `tl-proxy`.
+The Python service does not automatically load a root `.env`:
 
 ```dotenv
 MODEL_PROVIDER=tl
@@ -76,7 +81,7 @@ MODEL_API_KEY=local-proxy-key
 MODEL_NAME=qwen3.8-flash
 ```
 
-Both GenSlide services default to `MODEL_PROVIDER=tl`; setting it explicitly
+The single GenSlide service defaults to `MODEL_PROVIDER=tl`; setting it explicitly
 is recommended for readable deployment configuration. `MODEL_PROTOCOL=tl` remains a
 backward-compatible alias; if both variables are set they must have the same
 value. In local proxy mode `MODEL_API_KEY` may be a non-empty development

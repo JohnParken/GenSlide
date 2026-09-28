@@ -1,148 +1,70 @@
-# GenSlide — AgentScope Content Generation Workbench
+# GenSlide — Skill 驱动的创作与写作助手
 
-GenSlide is being migrated to a Skill-driven writing assistant for editable Word/WPS documents,
-PPTX decks and plain writing, through a request-bound, multi-user API backed by
-**AgentScope 2.0.7.post1**.
+当前唯一执行引擎是 AgentScope。用户可以讨论、列纲、直接出稿和修改当前稿，
+不必依次完成“大纲 → 确认 → 生成”。每轮返回 `reply / outline / deliverable`。
+输出能力由当前加载的 Skill 决定；目前内置 `document` 与 `official-document-skill`，
+不能因渲染器支持 PPTX 就假设内置目录仍有 presentation Skill。
 
-AgentScope is the **only** engine in this repository. The earlier LangGraph service and the
-original GPT-4o Streamlit pipeline have been removed; see
-[Repository layout](#repository-layout) for what remains.
+## 从这里开始
 
----
+- [本地启动与测试指南](docs/development/local-testing.md)：环境准备、离线测试、逐步启动、在线联调和排错。
+- [当前架构与代码导航](docs/architecture/current-system.md)：模块职责、状态与边界。
+- [后端配置与契约](backend/README.md)、[前端说明](frontend/README.md)、[脚本说明](scripts/README.md)。
+- [文档索引](docs/README.md)：当前规范与历史记录分开查阅。
 
-## Architecture
+## 目录结构
 
-```
-Development assistant         BFF gateway                AgentScope service            TL proxy
-frontend/assistant_demo.py → mock_bff :8010         →  genslide-agentscope :8002 → tl-proxy :8089 → model
-   (natural language turns)     (DEV ONLY, in memory)       (Skill → reply/outline/deliverable)
-```
-
-Each request carries its own authorization and materials; the execution service keeps no database
-and no Redis. The current change separates an action's authorized execution context from its
-disposable local workspace. Persistent user authoring spaces are deferred to the production BFF.
-See [workspace lifetimes](docs/architecture/execution-workspaces.md) and the
-[future TDSQL MariaDB 10.3 contract](docs/architecture/tdsql-mariadb-10.3-bff-contract.md).
-
-The Streamlit workbench is a development demonstration. It is not a production
-identity or persistence boundary. `frontend/assistant_client.py` defines the user-facing BFF
-adapter for an existing authenticated transport; this repository contains no Vue application or
-production BFF. Do not expose the dev mock to users.
-
----
-
-## Repository layout
-
-```
+```text
 GenSlide/
+├── backend/                    # 独立后端 Python 环境
+│   ├── genslide_agentscope/     # 执行运行时、创作、模型/BFF 适配与内置 Skill
+│   ├── tests/                  # 后端单元、契约与 HTTP 集成测试
+│   ├── contracts/              # 后端 schema 副本，测试守护一致性
+│   └── deploy/                 # Kubernetes 示例；Dockerfile 在 backend 根目录
 ├── frontend/
-│   ├── service_chat.py          # Streamlit workbench (expert council + autonomous mode)
-│   ├── assistant_demo.py        # Current server-side assistant demo (make run)
-│   ├── assistant_client.py      # Public BFF adapter, supplied authenticated transport
-│   ├── service_chat_client.py   # BFF client and session state
-│   ├── autonomous_agent.py      # Free-form agent that drives drafting/rendering
-│   └── expert_council.py        # Expert personas mapped onto skills
-├── backend/                     # The content API (genslide_agentscope, tests, contracts, deploy, Dockerfile)
-├── services/
-│   └── tl-proxy/                # chatbbc two-stage protocol → Qwen/DeepSeek
-├── scripts/                     # Local dev stack start/stop + flow check
-├── tests/                       # Root workbench/agent tests
-├── contracts/genslide-v1/       # Versioned request contract (schema + notes)
-└── docs/                        # Architecture notes and TL protocol references
+│   ├── assistant_demo.py       # 默认 Streamlit 开发演示入口
+│   ├── assistant_client.py     # 用户 BFF transport 适配示例
+│   ├── service_chat_client.py  # 本地 mock BFF/执行服务协调
+│   ├── legacy/                # 旧工作台、本地 agent、专家团；非默认执行路径
+│   └── tests/                 # 当前前端与旧工作台回归测试
+├── test-tools/tl-proxy/        # 可选 Node.js TL 联调代理及其测试
+├── scripts/
+│   ├── dev/                   # 本地启动/停止脚本
+│   └── testing/               # 在线冒烟、旧工作台质量评估
+├── contracts/genslide-v1/     # 仓库级执行请求契约
+├── docs/
+│   ├── development/           # 本地操作指南
+│   ├── architecture/          # 当前架构与未来 BFF/TDSQL 设计
+│   ├── archive/               # 已取代的方案与历史实施记录
+│   └── skills/                # TL 协议参考资料，不是后端自动加载的 Skill
+└── pyproject.toml / uv.lock    # 前端与开发脚本环境
 ```
 
----
+## 快速验证（无需模型密钥）
 
-## Local development
+仓库根目录执行，推荐 Python 3.12：
 
-### Prerequisites
-
-- Python 3.12 (`uv` manages environments)
-- Node.js 22 for `test-tools/tl-proxy`
-
-### Start the whole dev stack
-
-```bash
-make dev-agentscope      # tl-proxy :8089, mock BFF :8010, AgentScope :8002, workbench :8501
+```sh
+uv sync --frozen --python 3.12
+uv run --locked pytest -q
+(cd backend && uv sync --frozen --python 3.12 && uv run --locked pytest -q)
 ```
 
-Then open <http://127.0.0.1:8501>. Stop everything with:
+根 pytest 仅收集 `frontend/tests`；后端使用独立锁定环境。
+两套环境不要混装：现有 Streamlit 与 AgentScope 的 protobuf 依赖范围不兼容。
 
-```bash
-make stop-agentscope
-```
+## 实现边界
 
-The script writes logs to `.logs/` and reuses any component already listening on its port.
+开发链路：`assistant_demo → mock BFF + AgentScope API → TL proxy（可选）→ 模型`。
+演示客户端协调 begin/execute；生产应由真实 BFF 鉴权和转发，不是浏览器持有服务令牌直连。
 
-### Start components manually
+- 已实现执行上下文与每轮临时目录，当前稿从 BFF claim 的可信快照恢复。
+- 后端不直接连接数据库或对象存储。TDSQL MariaDB 10.3 是生产 BFF 权威元数据的设计目标。
+- 本仓库没有生产 BFF、Vue 应用、持久用户创作空间或已验证的 TDSQL 服务。
+- mock BFF 重启丢失数据；旧工作台本地记忆和下载不是生产方案。
+- 后端使用 POSIX 文件锁；Windows 请用 WSL2/Linux，不支持原生 Windows 完整运行。
 
-Configure `test-tools/tl-proxy/.env` with your `UPSTREAM_*` values first, then:
-
-```bash
-# TL proxy
-cd test-tools/tl-proxy && npm ci && npm run build && npm start
-
-# Mock BFF
-cd backend
-uv run --locked uvicorn genslide_agentscope.mock_bff:create_mock_bff \
-  --factory --host 127.0.0.1 --port 8010
-
-# AgentScope service
-cd backend
-uv run --locked uvicorn genslide_agentscope.api:create_app \
-  --factory --host 127.0.0.1 --port 8002
-
-# Workbench (repo root)
-make run
-```
-
-Shared environment for local runs:
-
-```bash
-export GENSLIDE_ENV=development
-export GENSLIDE_ALLOW_MOCK=1
-export GENSLIDE_SERVICE_TOKEN=local-development-token-at-least-32-characters
-export GENSLIDE_BFF_URL=http://127.0.0.1:8010/internal/genslide/v1
-export MODEL_PROVIDER=tl
-export MODEL_BASE_URL=http://127.0.0.1:8089
-export MODEL_API_KEY=local-proxy-key
-export MODEL_NAME=qwen3.8-flash
-```
-
-Set `MODEL_PROVIDER=openai` to use an OpenAI-compatible provider instead of the TL proxy.
-
----
-
-## Testing
-
-```bash
-make test              # root workbench/agent tests
-make test-service      # backend service suite
-make test-flow         # end-to-end check against the running dev stack
-```
-
-The service suite is fully self-contained and runs from its own locked environment:
-
-```bash
-cd backend && uv run --locked pytest -q
-```
-
----
-
-## Configuration notes
-
-- The root environment intentionally does **not** install the `agentscope` framework. The root
-  code imports only `genslide_agentscope` submodules that carry no AgentScope symbols
-  (`content_io`, `skills`, `tl_provider`). Install and run the framework inside
-  `backend`, which pins `agentscope==2.0.7.post1`.
-- `frontend/autonomous_agent.py` adds `backend` to `sys.path`, so the
-  workbench and root tests consume the service source directly rather than a second copy.
-- Installing `agentscope` into the root environment is not possible alongside
-  `streamlit==1.34.0`: AgentScope requires `protobuf>=5.0,<8.0` through
-  `opentelemetry-exporter-otlp`, while Streamlit 1.34 pins `protobuf<5`. Raising the Streamlit
-  pin would be required to merge the two environments.
-
----
+目录调整保留 `genslide_agentscope` 包名、后端镜像构建上下文及 HTTP API。
 
 ## License
 

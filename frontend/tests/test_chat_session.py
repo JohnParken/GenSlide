@@ -1,7 +1,7 @@
 """Offline session persistence and client state regressions."""
 from unittest.mock import patch
 
-from frontend.chat_session import load_session, save_session
+from frontend.legacy.chat_session import load_session, save_session
 from frontend.service_chat_client import ChatClient, ChatState
 
 

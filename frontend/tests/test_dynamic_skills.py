@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import AsyncMock, patch
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _AGENTSCOPE_SRC = _REPO_ROOT / "backend"
 _FRONTEND_DIR = _REPO_ROOT / "frontend"
 
@@ -15,19 +15,16 @@ for p in [str(_AGENTSCOPE_SRC), str(_FRONTEND_DIR)]:
         sys.path.insert(0, p)
 
 from genslide_agentscope.skills import SkillRegistry
-from autonomous_agent import AutonomousAgent
+from frontend.legacy.autonomous_agent import AutonomousAgent
 
 
 class TestDynamicSkills(unittest.TestCase):
-    def test_default_skill_discovery_includes_all_skills(self):
-        """Verify that default SkillRegistry loads all skills including official-document-skill."""
+    def test_default_skill_discovery_includes_only_current_catalog(self):
+        """Verify the current packaged catalog after the earlier Skill removal."""
         registry = SkillRegistry()
         skill_ids = [s["skill_id"] for s in registry.list_skills()]
-        self.assertIn("business-report", skill_ids)
-        self.assertIn("document", skill_ids)
-        self.assertIn("presentation", skill_ids)
-        self.assertIn("writing", skill_ids)
-        self.assertIn("official-document-skill", skill_ids)
+        self.assertEqual(set(skill_ids), {"document", "official-document-skill"})
+        self.assertTrue({"business-report", "presentation", "writing"}.isdisjoint(skill_ids))
 
         # Verify official-document-skill metadata and large instruction size
         official = registry.get("document", "official-document-skill")

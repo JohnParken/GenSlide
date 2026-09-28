@@ -22,7 +22,7 @@ from pydantic import ValidationError
 import httpx
 
 # Ensure backend package is importable
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _AGENTSCOPE_SRC = _REPO_ROOT / "backend"
 if str(_AGENTSCOPE_SRC) not in os.sys.path:
     os.sys.path.insert(0, str(_AGENTSCOPE_SRC))

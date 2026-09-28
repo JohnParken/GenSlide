@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from genslide_agentscope.domain import Content, ExecuteRequest, Memory, ServiceError, content_hash
 from genslide_agentscope.skills import SkillRegistry
 from genslide_agentscope.workflow import execute, length_target
@@ -11,16 +12,21 @@ def req(**changes):
     base.update(changes); return ExecuteRequest(**base)
 def body(title="Guide", sections=("Intro",)): return {"title": title, "sections": [{"title": s, "body": "Text"} for s in sections]}
 def decision(effect="deliverable", **kw): return {"effect": effect, "target_kind": "writing", "skill_id": "writing", **kw}
+def writing_skills(tmp_path):
+    skill = Path(tmp_path) / "writing" / "SKILL.md"
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_text("---\nname: writing\ndescription: Test writing skill\nmetadata:\n  target_kind: writing\n---\nTest instructions", encoding="utf-8")
+    return SkillRegistry(Path(tmp_path))
 @pytest.mark.asyncio
-async def test_execute_uses_decide_then_compose_and_keeps_materials_out_of_decide():
+async def test_execute_uses_decide_then_compose_and_keeps_materials_out_of_decide(tmp_path):
     model = Model(decision(), {"effect":"deliverable", "deliverable":body()})
-    result = await execute(req(), Memory(), "PRIVATE", model, SkillRegistry())
+    result = await execute(req(), Memory(), "PRIVATE", model, writing_skills(tmp_path))
     assert [c["phase"] for c in model.calls] == ["decide", "compose"]
     assert "materials" not in model.calls[0] and model.calls[1]["materials"] == "PRIVATE"
     assert result.effect == "deliverable"
 @pytest.mark.asyncio
-async def test_local_edit_scope_replaces_only_named_section_and_hashes_snapshot():
-    current = Content.model_validate(body(sections=("Intro", "Details"))); skills = SkillRegistry()
+async def test_local_edit_scope_replaces_only_named_section_and_hashes_snapshot(tmp_path):
+    current = Content.model_validate(body(sections=("Intro", "Details"))); skills = writing_skills(tmp_path)
     memory = Memory(content=current, content_hash=content_hash(current), target_kind="writing", skill_id="writing", skill_version=skills.skills["writing"]["version"], skill_hash=skills.skills["writing"]["hash"])
     model = Model(decision(edit_scope=["Details"], needs_full_content=True), {"effect":"deliverable", "deliverable":body(sections=("Details",))})
     result = await execute(req(message="tighten Details"), memory, "", model, skills)
@@ -29,9 +35,9 @@ async def test_local_edit_scope_replaces_only_named_section_and_hashes_snapshot(
 @pytest.mark.parametrize("text, expected", [("约3000字",3000),("5000-8000字",6500),("3页",None)])
 def test_length_requirement_parses(text, expected): assert length_target({"length":text}) == expected
 @pytest.mark.asyncio
-async def test_invalid_edit_scope_is_rejected():
+async def test_invalid_edit_scope_is_rejected(tmp_path):
     with pytest.raises(ServiceError, match="EDIT_SCOPE_INVALID"):
-        await execute(req(), Memory(content=body(), target_kind="writing"), "", Model(decision(edit_scope=["Missing"], needs_full_content=True)), SkillRegistry())
+        await execute(req(), Memory(content=body(), target_kind="writing"), "", Model(decision(edit_scope=["Missing"], needs_full_content=True)), writing_skills(tmp_path))
 
 @pytest.mark.asyncio
 async def test_explicit_output_intent_mismatch_is_rejected():

@@ -19,18 +19,15 @@ import uuid
 from zipfile import BadZipFile, ZipFile
 import streamlit as st
 
-try:
-    from frontend.service_chat_client import ChatClient, ChatClientError, ChatState
-    from frontend.autonomous_agent import AutonomousAgent, detect_target_kind, route_professional_intent
-    from frontend.expert_council import get_expert, list_all_experts, ExpertProfile
-    from frontend.chat_context import read_attachment_bytes
-    from frontend.chat_session import load_session, save_session
-except ImportError:  # streamlit run frontend/service_chat.py
-    from service_chat_client import ChatClient, ChatClientError, ChatState
-    from autonomous_agent import AutonomousAgent, detect_target_kind, route_professional_intent
-    from expert_council import get_expert, list_all_experts, ExpertProfile
-    from chat_context import read_attachment_bytes
-    from chat_session import load_session, save_session
+# Streamlit executes this file by path; make package imports independent of cwd.
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from frontend.service_chat_client import ChatClient, ChatClientError, ChatState
+from frontend.legacy.autonomous_agent import AutonomousAgent, detect_target_kind, route_professional_intent
+from frontend.legacy.expert_council import get_expert, list_all_experts, ExpertProfile
+from frontend.legacy.chat_context import read_attachment_bytes
+from frontend.legacy.chat_session import load_session, save_session
 
 def rerun_workbench():
     save_session(st.session_state)

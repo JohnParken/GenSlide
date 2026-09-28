@@ -1,15 +1,15 @@
-"""Tests for AutonomousAgent in frontend/autonomous_agent.py."""
+"""Tests for AutonomousAgent in frontend/legacy/autonomous_agent.py."""
 import asyncio
 import os
 import sys
 import unittest
 from unittest.mock import AsyncMock, patch
 
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(_REPO_ROOT, "frontend"))
 sys.path.insert(0, os.path.join(_REPO_ROOT, "backend"))
 
-from autonomous_agent import AutonomousAgent, AutonomousResult, _extract_json, detect_target_kind
+from frontend.legacy.autonomous_agent import AutonomousAgent, AutonomousResult, _extract_json, detect_target_kind
 
 
 class TestAutonomousAgent(unittest.TestCase):

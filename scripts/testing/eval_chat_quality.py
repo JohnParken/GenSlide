@@ -13,7 +13,7 @@ import time
 from copy import deepcopy
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 CASES = [
     {
@@ -55,7 +55,7 @@ CASES = [
 
 
 async def evaluate(cases: list[dict]) -> list[dict]:
-    from frontend.autonomous_agent import AutonomousAgent
+    from frontend.legacy.autonomous_agent import AutonomousAgent
 
     agent = AutonomousAgent()
     reports = []

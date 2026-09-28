@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 from docx import Document
 
-from frontend.autonomous_agent import AutonomousAgent, detect_target_kind
-from frontend.chat_context import read_attachment_bytes, updated_requirements, RequirementUpdate
+from frontend.legacy.autonomous_agent import AutonomousAgent, detect_target_kind
+from frontend.legacy.chat_context import read_attachment_bytes, updated_requirements, RequirementUpdate
 from genslide_agentscope.authoring import explicit_length, length_bounds, length_target
 
 
@@ -78,7 +78,7 @@ def test_failed_render_does_not_mutate_input_draft_or_memory():
         '{"skill":"revise","section_ids":["sec-1"]}',
         '{"sections":[{"title":"章节","body":"新文","notes":""}]}',
     ])
-    with patch("frontend.autonomous_agent.render_content", side_effect=ValueError("render failed")):
+    with patch("frontend.legacy.autonomous_agent.render_content", side_effect=ValueError("render failed")):
         try:
             asyncio.run(agent.astep("修改第一章", current_content=original, memory=memory))
         except ValueError as exc:

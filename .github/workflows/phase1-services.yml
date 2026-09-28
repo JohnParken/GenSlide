@@ -1,9 +1,9 @@
 name: GenSlide CI
 on:
   push:
-    paths: ['backend/**', 'services/**', 'frontend/**', 'tests/**', 'scripts/**', 'pyproject.toml', 'uv.lock', '.github/workflows/phase1-services.yml']
+    paths: ['backend/**', 'test-tools/**', 'frontend/**', 'contracts/**', 'scripts/**', 'pyproject.toml', 'uv.lock', '.github/workflows/phase1-services.yml']
   pull_request:
-    paths: ['backend/**', 'services/**', 'frontend/**', 'tests/**', 'scripts/**', 'pyproject.toml', 'uv.lock', '.github/workflows/phase1-services.yml']
+    paths: ['backend/**', 'test-tools/**', 'frontend/**', 'contracts/**', 'scripts/**', 'pyproject.toml', 'uv.lock', '.github/workflows/phase1-services.yml']
 permissions:
   contents: read
 jobs:
@@ -15,15 +15,15 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: services/tl-proxy/package-lock.json
+          cache-dependency-path: test-tools/tl-proxy/package-lock.json
       - run: npm ci
-        working-directory: services/tl-proxy
+        working-directory: test-tools/tl-proxy
       - run: npm run typecheck
-        working-directory: services/tl-proxy
+        working-directory: test-tools/tl-proxy
       - run: npm run build
-        working-directory: services/tl-proxy
+        working-directory: test-tools/tl-proxy
       - run: npm test
-        working-directory: services/tl-proxy
+        working-directory: test-tools/tl-proxy
   agentscope:
     runs-on: ubuntu-latest
     steps:
