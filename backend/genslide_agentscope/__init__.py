@@ -19,6 +19,16 @@ from .prompts import (
     PromptPipeline,
     create_default_pipeline,
 )
+from .runtime import (
+    Phase,
+    HookAction,
+    HookResult,
+    HookContext,
+    HookBase,
+    HookRegistry,
+    HookCycleError,
+    RuntimeEngine,
+)
 
 __all__ = [
     "__version__",
@@ -35,4 +45,12 @@ __all__ = [
     "GoalLedgerContributor",
     "PromptPipeline",
     "create_default_pipeline",
+    "Phase",
+    "HookAction",
+    "HookResult",
+    "HookContext",
+    "HookBase",
+    "HookRegistry",
+    "HookCycleError",
+    "RuntimeEngine",
 ]
