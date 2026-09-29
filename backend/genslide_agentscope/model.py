@@ -5,6 +5,7 @@ import os
 from .config import model_provider_from_env
 from .domain import ServiceError
 from .tl_provider import TLProvider
+from .gateway import loads_repaired, sanitize_model_output, get_capability_cache
 
 MAX_INPUT_BYTES = 60000
 MAX_OUTPUT_BYTES = 160000
@@ -22,12 +23,9 @@ def encode_payload(payload):
 def decode_output(raw):
     if not isinstance(raw, str) or len(raw.encode()) > MAX_OUTPUT_BYTES:
         raise ServiceError("MODEL_OUTPUT_INVALID", 502)
-    text = raw.strip()
-    if text.startswith("```json") and text.endswith("```"):
-        text = text[7:-3].strip()
     try:
-        value = json.loads(text)
-    except (ValueError, TypeError) as exc:
+        value = loads_repaired(raw)
+    except Exception as exc:
         raise ServiceError("MODEL_OUTPUT_INVALID", 502) from exc
     if not isinstance(value, dict):
         raise ServiceError("MODEL_OUTPUT_INVALID", 502)
