@@ -1,9 +1,10 @@
 # 文档索引
 
-## 当前使用
+## 当前使用与架构
 
+- [通用云端长程任务助手架构总案](architecture/cloud-long-horizon-agent.md)：核心系统定位演进、五阶段执行计划、模块设计与实战指南。
+- [当前系统与代码导航](architecture/current-system.md)：模块职责和已实现边界。
 - [本地启动与测试](development/local-testing.md)：按步骤准备、启动、验证和排错。
-- [当前系统与代码导航](architecture/current-system.md)：职责和已实现边界。
 - [执行工作区](architecture/execution-workspaces.md)：三层 workspace、取消、配额与回收。
 - [执行契约](../contracts/genslide-v1/README.md)、[后端说明](../backend/README.md)。
 - [前端说明](../frontend/README.md)、[脚本说明](../scripts/README.md)、[TL 代理](../test-tools/tl-proxy/README.md)。

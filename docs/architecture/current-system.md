@@ -1,22 +1,28 @@
 # 当前系统与代码导航
 
-生产目标为用户 → 真实 BFF → AgentScope 执行服务。本仓库只有执行服务和开发 mock。
+生产目标为用户 → 真实 BFF → AgentScope 执行服务。本仓库包含通用长程任务内核、执行服务和开发 mock。
+详细的通用长程架构蓝图与五阶段演进路线请参见 [通用云端长程任务助手总案](cloud-long-horizon-agent.md)。
+
 开发 UI 的 ChatClient 先向 mock `/dev/begin` 取得授权，再调用执行 API；不能把这种服务认证模式搬到生产浏览器。
 
-执行过程：claim 可信上下文 → 固定 Skill → 决策/创作 → 按 effect 渲染 → 暂存上传 → BFF 原子提交结果和快照。
+执行过程：claim 可信上下文 → 组装优先级提示词流水线 → 经过 8 阶段生命周期内核与长程规划门控 → 驱动通用 ReAct 或创作流水线 → BFF 原子提交结果和快照。
 `reply / outline / deliverable` 是结果类别，不是用户必须依次通过的流程。
 
 ## 后端模块（backend/genslide_agentscope）
 
 | 模块 | 职责 |
 | --- | --- |
+| `gateway/` | **自愈式模型网关**：`<think>` 思考链剥离、四级自愈式 JSON 容错解析、模型能力试错缓存 |
+| `prompts/` | **优先级提示词流水线**：P100 安全契约、P80 结构规范、P60 目标进度账本流水线组装 |
+| `runtime/` | **8 阶段生命周期内核**：`Phase` 调度、DAG 拓扑 Hook 编排、取消防护、`ReActAgent` 执行器 |
+| `planning/` | **长程规划与门控**：`GoalLedger` 任务账本、步数上限、死循环熔断与完成准则门控 |
 | `api.py`、`config.py` | 内部 API、认证入口、生命周期与配置 |
 | `domain.py` | 严格请求/结果模型、可信快照 |
 | `execution.py` | 准入、租约、版本、取消收尾、文件校验与提交 |
 | `workspace.py` | 执行实例临时目录、容量、锁与残留回收 |
 | `engine.py`、`workflow.py`、`authoring.py` | 回合决策、正文生成和局部修改 |
 | `skills.py`、`skills/` | 可信 Skill 注册和版本/hash；不执行脚本 |
-| `model.py`、`tl_provider.py`、`tl_transport.py` | 模型及 TL 协议适配 |
+| `model.py`、`tl_provider.py`、`tl_transport.py` | 模型及 TL 协议适配（已接入 gateway 自愈解析） |
 | `attachment_policy.py`、`content_io.py` | 统一附件策略、解析与渲染 |
 | `bff.py` | 生产 BFF 内部 HTTP 契约适配 |
 | `mock_bff.py` | 显式启用的内存开发模拟器 |

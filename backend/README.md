@@ -1,8 +1,54 @@
-# GenSlide AgentScope 创作助手 API
+# GenSlide AgentScope 通用长程任务助手与创作 API
 
-独立安装、独立部署，不 import 根目录工作台代码。
+独立安装、独立部署，不 import 根目录旧版工作台代码。
 框架版本：`agentscope==2.0.7.post1`；推荐 Python 3.12（支持 3.11–3.12）。
-无 MySQL/TDSQL、Redis、Streamlit 或对象存储连接要求。
+无 MySQL/TDSQL、Redis、Streamlit 或对象存储直接连接要求。
+
+> **核心架构升级**：系统已全面升级为**通用云端长程任务助手（Cloud Long-Horizon Agent Platform）**，支持自愈式模型网关、优先级提示词流水线、标准 8 阶段请求生命周期编排，以及带任务账本（GoalLedger）和防死循环门控（StopGates）的通用 ReAct 循环。详细架构蓝图与五阶段演进计划参见 [通用云端长程任务助手总案](../docs/architecture/cloud-long-horizon-agent.md)。
+
+## 架构核心模块与职责
+
+| 模块 | 核心类 / 函数 | 职责与能力 |
+| --- | --- | --- |
+| `gateway/` | `loads_repaired`, `sanitize_model_output`, `ModelCapabilityCache` | **自愈式模型网关**：剥离 `<think>` 思考链、四级 JSON 启发式与库级修复（消灭 502 错误）、模型参数特征试错缓存 |
+| `prompts/` | `PromptPipeline`, `PromptContext`, `PromptContributor` | **优先级提示词流水线**：按拓扑优先级（P100 安全契约 $\to$ P80 结构约束 $\to$ P60 目标账本）动态渲染不可篡改的系统提示词 |
+| `runtime/` | `Phase`, `HookRegistry`, `RuntimeEngine`, `ReActAgent` | **标准 8 阶段生命周期内核**：编排标准 8 阶段流转、基于 DAG 拓扑排序与破平的 Hook 拦截系统、取消收尾屏蔽保护与通用 ReAct 循环 |
+| `planning/` | `GoalLedger`, `TaskItem`, `CompositeGate`, `StopGate` | **长程规划与门控**：多步长程任务账本维护、进度跟踪、最大步数熔断、死循环检测（DoomLoopGate）与完成准则判定 |
+| `domain.py` | `ExecuteRequest`, `Memory`, `ExecutionSnapshot` | 严格请求/结果强类型模型、BFF 可信快照校验 |
+| `execution.py` | `PreparedExecution`, `WorkspaceManager` | 准入排队、并发租约、POSIX 文件锁、应用层配额检查、两级优雅取消 |
+| `content_io.py` | `render_presentation`, `render_document` | 纯 Python 原生 Word/PPTX 解析与结构化排版渲染（零外部系统依赖） |
+| `bff.py` | `BFF`, `Claim`, `CommitOutcome` | 生产 BFF 内部 HTTP 契约适配与原子结算 |
+
+## 通用长程 ReAct Agent 使用示例
+
+```python
+import asyncio
+from genslide_agentscope.planning import GoalLedger
+from genslide_agentscope.runtime import HookContext, ReActAgent
+from genslide_agentscope.model import Model
+
+async def main():
+    # 1. 初始化长程任务账本
+    ledger = GoalLedger(goal="调研分析并输出多源汇总摘要")
+    t1 = ledger.add_task("抓取核心指标", "通过工具获取数据")
+    t2 = ledger.add_task("产出总结答复", "输出面向用户的完整分析")
+
+    # 2. 装配 ReAct 助手（带工具处理器与门控）
+    async def sample_tool(name: str, params: dict):
+        return {"data": "2024 关键增长率 18.5%"}
+
+    agent = ReActAgent(model=Model(), tool_handler=sample_tool)
+    ctx = HookContext(session_id="session_example")
+
+    # 3. 运行多步长程规划循环
+    result = await agent.execute_turn(ctx, ledger=ledger)
+    print("状态:", result.status)
+    print("总迭代步数:", result.iterations)
+    print("最终答复:", result.final_reply)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
 
 ## 已实现的入口
 

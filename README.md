@@ -1,14 +1,13 @@
-# GenSlide — Skill 驱动的创作与写作助手
+# GenSlide — 通用云端长程任务助手与创作平台
 
-当前唯一执行引擎是 AgentScope。用户可以讨论、列纲、直接出稿和修改当前稿，
-不必依次完成“大纲 → 确认 → 生成”。每轮返回 `reply / outline / deliverable`。
-输出能力由当前加载的 Skill 决定；目前内置 `document` 与 `official-document-skill`，
-不能因渲染器支持 PPTX 就假设内置目录仍有 presentation Skill。
+基于 AgentScope 构建的工业级云端长程任务助手与智能内容服务。
+系统已完成核心架构升级，支持**自愈式模型网关、优先级提示词流水线（P100/P80/P60）、标准 8 阶段请求生命周期编排内核，以及带长程任务账本（GoalLedger）和防死循环门控（StopGates）的通用 ReAct 循环**。同时完整保留高效的结构化文档与幻灯片原生渲染能力。
 
 ## 从这里开始
 
-- [本地启动与测试指南](docs/development/local-testing.md)：环境准备、离线测试、逐步启动、在线联调和排错。
+- [通用云端长程任务助手架构总案与全阶段计划](docs/architecture/cloud-long-horizon-agent.md)：核心系统定位演进、五阶段执行计划、模块设计与实战指南。
 - [当前架构与代码导航](docs/architecture/current-system.md)：模块职责、状态与边界。
+- [本地启动与测试指南](docs/development/local-testing.md)：环境准备、离线测试、逐步启动、在线联调和排错。
 - [后端配置与契约](backend/README.md)、[前端说明](frontend/README.md)、[脚本说明](scripts/README.md)。
 - [文档索引](docs/README.md)：当前规范与历史记录分开查阅。
 
