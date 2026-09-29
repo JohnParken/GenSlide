@@ -3,6 +3,7 @@
 from .phases import Phase, HookAction, HookResult
 from .hooks import HookContext, HookBase, HookRegistry, HookCycleError
 from .engine import RuntimeEngine, _shielded_cleanup
+from .react_agent import ReActAgent, ReActStep, ReActResult
 
 __all__ = [
     "Phase",
@@ -14,4 +15,7 @@ __all__ = [
     "HookCycleError",
     "RuntimeEngine",
     "_shielded_cleanup",
+    "ReActAgent",
+    "ReActStep",
+    "ReActResult",
 ]

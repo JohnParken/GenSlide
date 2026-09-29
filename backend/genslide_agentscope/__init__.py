@@ -28,6 +28,20 @@ from .runtime import (
     HookRegistry,
     HookCycleError,
     RuntimeEngine,
+    ReActAgent,
+    ReActStep,
+    ReActResult,
+)
+from .planning import (
+    TaskStatus,
+    TaskItem,
+    GoalLedger,
+    GateDecision,
+    StopGate,
+    MaxIterationsGate,
+    DoomLoopGate,
+    CompletionRubricGate,
+    CompositeGate,
 )
 
 __all__ = [
@@ -53,4 +67,16 @@ __all__ = [
     "HookRegistry",
     "HookCycleError",
     "RuntimeEngine",
+    "ReActAgent",
+    "ReActStep",
+    "ReActResult",
+    "TaskStatus",
+    "TaskItem",
+    "GoalLedger",
+    "GateDecision",
+    "StopGate",
+    "MaxIterationsGate",
+    "DoomLoopGate",
+    "CompletionRubricGate",
+    "CompositeGate",
 ]
