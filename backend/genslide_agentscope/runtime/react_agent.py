@@ -78,6 +78,12 @@ class ReActAgent:
         run_status = "continue"
 
         while True:
+            # 0. Enforce explicit invocation-level hard turn budget
+            if iteration >= max_turns:
+                run_status = "max_iterations_exceeded"
+                stop_reason = f"Reached turn-level maximum iterations limit ({max_turns})"
+                break
+
             # 1. Evaluate termination gates
             gate_decision: GateDecision = self.gates.evaluate(iteration, step_history, active_ledger)
             if gate_decision.should_stop:

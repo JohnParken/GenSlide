@@ -33,8 +33,17 @@ for role, text in st.session_state.assistant_messages:
 
 pending = st.session_state.assistant_pending
 if pending:
-    st.info("上次请求尚未确认结果。重试将保留原 action 和本轮输入。")
-retry = st.button("重试原请求", disabled=not pending)
+    st.info("上次请求尚未确认结果。重试将保留原 action 和本轮输入，也可以放弃并创建新输入。")
+    col1, col2 = st.columns(2)
+    with col1:
+        retry = st.button("重试原请求")
+    with col2:
+        if st.button("放弃上次请求并重新输入"):
+            st.session_state.assistant_pending = None
+            st.rerun()
+else:
+    retry = False
+
 message = st.chat_input("聊想法、修改原稿，或直接让我写作", disabled=bool(pending))
 if message or retry:
     if message:
@@ -54,6 +63,11 @@ if message or retry:
         st.rerun()
     except Exception as exc:
         st.error(f"请求未完成：{exc}")
+        # 如果是确定性的终态失败（如 422 校验失败、ACTION_CLOSED、SKILL_NOT_FOUND 等），自动允许用户清除 pending
+        err_msg = str(exc)
+        if any(term in err_msg for term in ("422", "409", "404", "ACTION_CLOSED", "SKILL_NOT_FOUND", "OUTPUT_INTENT_MISMATCH")):
+            st.warning("该操作已进入终态失败。您可修改参数后直接提交新消息。")
+            st.session_state.assistant_pending = None
 
 if state.content:
     st.subheader(state.content.get("title", "当前稿"))

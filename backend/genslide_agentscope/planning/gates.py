@@ -55,9 +55,13 @@ class DoomLoopGate:
         self.repetition_threshold = repetition_threshold
 
     def _hash_action(self, step: dict[str, Any]) -> str:
+        # Check standard ReActStep action_input first, then fallback to parameters
+        params = step.get("action_input")
+        if params is None:
+            params = step.get("parameters")
         payload = {
             "action": step.get("action"),
-            "params": step.get("parameters"),
+            "params": params,
         }
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()

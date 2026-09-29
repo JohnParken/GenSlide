@@ -1,13 +1,7 @@
 """Fault-tolerant and self-healing JSON parser.
 
-Handles common LLM formatting flaws:
-- Wrapping markdown code fences (```json ... ```)
-- Unescaped newlines in strings
-- Trailing commas in arrays and objects
-- Single quotes instead of double quotes
-- Missing closing braces or brackets due to truncation
-- Python literal values (True, False, None)
-- Conversational preambles or postscripts
+Preserves legitimate JSON strings verbatim on the fast path, only applying
+outer wrapper stripping and heuristic/library repairs when parsing fails.
 """
 from __future__ import annotations
 
@@ -26,9 +20,7 @@ except ImportError:  # pragma: no cover
     json_repair = None
 
 
-_JSON_EXTRACT_PATTERN = re.compile(r"(\{.*\}|\[.*\])", flags=re.DOTALL)
 _TRAILING_COMMA_PATTERN = re.compile(r",\s*([\]\}])")
-_UNQUOTED_KEY_PATTERN = re.compile(r'(?<=[{,\s])([a-zA-Z_][a-zA-Z0-9_-]*)\s*:\s*')
 _PYTHON_LITERAL_REPLACEMENTS = [
     (re.compile(r"\bTrue\b"), "true"),
     (re.compile(r"\bFalse\b"), "false"),
@@ -36,12 +28,22 @@ _PYTHON_LITERAL_REPLACEMENTS = [
 ]
 
 
-def _strip_envelope(text: str) -> str:
+def _extract_outermost_json(text: str) -> str:
     """Find and return the outermost { ... } or [ ... ] block if present."""
     text = text.strip()
-    match = _JSON_EXTRACT_PATTERN.search(text)
-    if match:
-        return match.group(1).strip()
+    first_obj = text.find("{")
+    last_obj = text.rfind("}")
+    first_arr = text.find("[")
+    last_arr = text.rfind("]")
+
+    # Determine whether object or array starts first
+    if first_obj != -1 and (first_arr == -1 or first_obj < first_arr):
+        if last_obj > first_obj:
+            return text[first_obj : last_obj + 1]
+    elif first_arr != -1:
+        if last_arr > first_arr:
+            return text[first_arr : last_arr + 1]
+
     return text
 
 
@@ -71,7 +73,6 @@ def _balance_brackets(text: str) -> str:
                 stack.pop()
 
     if stack:
-        # If open string at truncation, close it first
         if in_string:
             text += '"'
         while stack:
@@ -101,38 +102,44 @@ def repair_json(raw_text: str) -> str:
     if not raw_text or not raw_text.strip():
         raise ValueError("Cannot repair empty JSON string")
 
-    # Step 1: Sanitize model output (strip <think> and markdown fences)
-    sanitized = sanitize_model_output(raw_text)
-    candidate = sanitized.clean_text.strip()
+    trimmed = raw_text.strip()
 
-    # Step 2: Try standard JSON parsing first
+    # 1. Fast path: already valid JSON
     try:
-        json.loads(candidate)
-        return candidate
+        json.loads(trimmed)
+        return trimmed
     except Exception:
         pass
 
-    # Step 3: Extract outermost JSON object/array
-    stripped = _strip_envelope(candidate)
+    # 2. Try after outer sanitization (strip outer <think> and outer code fences)
+    sanitized = sanitize_model_output(trimmed)
+    clean = sanitized.clean_text.strip()
     try:
-        json.loads(stripped)
-        return stripped
+        json.loads(clean)
+        return clean
     except Exception:
         pass
 
-    # Step 4: Apply heuristic corrections
-    healed = _heuristic_repair(stripped)
+    # 3. Extract outermost JSON slice
+    outermost = _extract_outermost_json(clean)
+    try:
+        json.loads(outermost)
+        return outermost
+    except Exception:
+        pass
+
+    # 4. Apply heuristic corrections
+    healed = _heuristic_repair(outermost)
     try:
         json.loads(healed)
         return healed
     except Exception:
         pass
 
-    # Step 5: Fallback to json_repair library if available
+    # 5. Deep repair via json_repair library
     if json_repair is not None:
         try:
-            repaired_lib = json_repair.repair_json(candidate)
-            # Verify that output from json_repair is parseable
+            repaired_lib = json_repair.repair_json(clean)
             json.loads(repaired_lib)
             return repaired_lib
         except Exception:
@@ -149,6 +156,9 @@ def repair_json(raw_text: str) -> str:
 def loads_repaired(raw_text: str) -> Any:
     """Parse JSON with multi-level self-healing recovery.
 
+    Preserves valid JSON strings verbatim. Only strips outer envelopes
+    or applies syntactic healing when standard parsing fails.
+
     Args:
         raw_text: The input text potentially containing JSON, markdown, or syntax flaws.
 
@@ -161,30 +171,37 @@ def loads_repaired(raw_text: str) -> Any:
     if not raw_text or not raw_text.strip():
         raise ValueError("Cannot parse empty JSON input")
 
-    # 1. Fast path: Direct parse on sanitized string
-    sanitized = sanitize_model_output(raw_text)
-    clean = sanitized.clean_text.strip()
+    trimmed = raw_text.strip()
 
+    # 1. Fast path: Direct strict parse on unmodified string (zero pollution)
+    try:
+        return json.loads(trimmed)
+    except Exception:
+        pass
+
+    # 2. Outer sanitization: Strip outer thinking tags and outermost code fences
+    sanitized = sanitize_model_output(trimmed)
+    clean = sanitized.clean_text.strip()
     try:
         return json.loads(clean)
     except Exception:
         pass
 
-    # 2. Extract envelope
-    envelope = _strip_envelope(clean)
+    # 3. Extract outermost envelope slice
+    envelope = _extract_outermost_json(clean)
     try:
         return json.loads(envelope)
     except Exception:
         pass
 
-    # 3. Heuristic repair
+    # 4. Heuristic repair on envelope
     repaired = _heuristic_repair(envelope)
     try:
         return json.loads(repaired)
     except Exception:
         pass
 
-    # 4. Deep repair via json_repair
+    # 5. Deep repair via json_repair
     if json_repair is not None:
         try:
             return json_repair.loads(clean)
@@ -194,7 +211,7 @@ def loads_repaired(raw_text: str) -> Any:
             except Exception:
                 pass
 
-    # Final attempt: repair_json and json.loads
+    # Final attempt: repair_json string then parse
     try:
         final_str = repair_json(raw_text)
         return json.loads(final_str)

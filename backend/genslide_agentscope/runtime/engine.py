@@ -18,14 +18,22 @@ ExecutorCallable = Callable[[HookContext], Awaitable[Any]]
 
 
 async def _shielded_cleanup(cleanup_coro: Awaitable[Any]) -> Any:
-    """Run a cleanup routine shielded from cancellation, but propagate cancellation when done."""
-    task = asyncio.create_task(cleanup_coro)
-    try:
-        return await asyncio.shield(task)
-    except asyncio.CancelledError:
-        # Await the cleanup task to guarantee it finishes releasing locks and resources
-        await task
-        raise
+    """Run a cleanup routine shielded from cancellation, resisting repeated cancellations.
+
+    Shield alone is insufficient: the caller must retain and join the cleanup task
+    under repeated CancelledError occurrences before relinquishing control.
+    """
+    task = asyncio.ensure_future(cleanup_coro)
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+    result = task.result()
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
 
 
 class RuntimeEngine:

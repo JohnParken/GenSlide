@@ -32,3 +32,89 @@ async def test_reply_does_not_create_file_content(tmp_path):
     assert result.effect == "reply"
     assert result.content is None
     assert result.deliverable is None
+
+
+@pytest.mark.asyncio
+async def test_multi_turn_continuity_with_pending_options(tmp_path):
+    from genslide_agentscope.domain import snapshot_from_memory, memory_from_snapshot
+
+    skills = writing_skills(tmp_path)
+    # Turn 1: Memory holds pending options from previous turn
+    mem1 = Memory(
+        last_reply="请选择风格：1. 商务正式 2. 轻松幽默",
+        pending_options={"1": "商务正式", "2": "轻松幽默"},
+    )
+    # User says "选第二个"
+    model = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing",
+         "requirement_updates": {"style": "轻松幽默"}},
+        {"effect": "reply", "reply": "已采用轻松幽默风格。"},
+    )
+    result = await execute(req(message="选第二个"), mem1, "", model, skills)
+    assert result.memory.requirements.get("style") == "轻松幽默"
+    assert "轻松幽默" not in result.memory.pending_options.values()
+
+    # Snapshot round-trip preserves state
+    snap = snapshot_from_memory(result.memory)
+    restored = memory_from_snapshot(snap)
+    assert restored.requirements.get("style") == "轻松幽默"
+
+
+@pytest.mark.asyncio
+async def test_large_content_local_edit_does_not_blow_context_budget(tmp_path):
+    from genslide_agentscope.domain import Section
+    from genslide_agentscope.model import encode_payload
+
+    # Create 3 sections with 8000 Chinese characters each (total 24000 characters ~ 72KB)
+    large_content = Content(
+        title="大型技术规划报告",
+        sections=[
+            Section(title=f"第{i}章 详尽分析", body="中" * 8000)
+            for i in range(1, 4)
+        ]
+    )
+    skills = writing_skills(tmp_path)
+    mem = Memory(
+        content=large_content,
+        content_hash=content_hash(large_content),
+        target_kind="writing",
+        skill_id="writing",
+        skill_version=skills.skills["writing"]["version"],
+        skill_hash=skills.skills["writing"]["hash"],
+    )
+
+    # Local revision on only Chapter 2
+    model = Model(
+        {
+            "effect": "deliverable",
+            "target_kind": "writing",
+            "skill_id": "writing",
+            "needs_full_content": False,
+            "edit_scope": ["第2章 详尽分析"],
+        },
+        {
+            "effect": "deliverable",
+            "deliverable": {
+                "title": "大型技术规划报告",
+                "sections": [{"title": "第2章 详尽分析", "body": "更新后的第2章内容"}],
+            },
+        },
+    )
+
+    res = await execute(req(message="更新第2章内容"), mem, "", model, skills)
+    compose_payload = model.calls[1]
+
+    # Verify that the compose payload only transmitted Chapter 2
+    scoped = compose_payload["current_content"]
+    assert len(scoped["sections"]) == 1
+    assert scoped["sections"][0]["title"] == "第2章 详尽分析"
+
+    # Verify payload encodes strictly within the 60000 byte budget!
+    encoded = encode_payload(compose_payload)
+    assert len(encoded.encode("utf-8")) < 60000
+
+    # Verify other chapters are preserved intact
+    assert res.content.sections[0].body == "中" * 8000
+    assert res.content.sections[1].body == "更新后的第2章内容"
+    assert res.content.sections[2].body == "中" * 8000
+

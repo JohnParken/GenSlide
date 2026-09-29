@@ -1,13 +1,15 @@
-"""Reasoning and output sanitization for LLM responses."""
+"""Reasoning and output sanitization for LLM responses.
+
+Carefully preserves legitimate markdown code blocks and internal content,
+while cleanly separating <think> tags and outer conversational markdown fences.
+"""
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 
-
 _THINK_PAIR_PATTERN = re.compile(r"<think>(.*?)</think>", flags=re.DOTALL | re.IGNORECASE)
 _THINK_OPEN_PATTERN = re.compile(r"<think>(.*)", flags=re.DOTALL | re.IGNORECASE)
-_MARKDOWN_BLOCK_PATTERN = re.compile(r"```(?:[a-zA-Z0-9_-]+)?\s*\n?(.*?)\n?```", flags=re.DOTALL)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +35,7 @@ def extract_thought(raw_text: str) -> tuple[str, str]:
     # 1. Replace closed pairs
     cleaned = _THINK_PAIR_PATTERN.sub(_replace_pair, raw_text)
 
-    # 2. Check for an unclosed <think> tag (e.g. streaming or token limit truncation)
+    # 2. Check for an unclosed <think> tag
     unclosed_match = _THINK_OPEN_PATTERN.search(cleaned)
     if unclosed_match:
         thoughts.append(unclosed_match.group(1).strip())
@@ -44,17 +46,21 @@ def extract_thought(raw_text: str) -> tuple[str, str]:
 
 
 def strip_markdown_fences(text: str) -> str:
-    """Extract inner content if wrapped in markdown code blocks, otherwise return original trimmed text."""
+    """Strip outermost markdown code block fences (```...```) wrapping the entire response.
+
+    Does NOT search for or alter inner code blocks inside text or JSON strings.
+    """
     if not text:
         return ""
-    text = text.strip()
-    match = _MARKDOWN_BLOCK_PATTERN.search(text)
-    if match:
-        # Check if the code block represents the core content
-        candidate = match.group(1).strip()
-        if candidate:
-            return candidate
-    return text
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+
+    lines = stripped.splitlines()
+    if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+
+    return stripped
 
 
 def sanitize_model_output(raw_text: str, strip_fences: bool = True) -> SanitizedOutput:
@@ -62,7 +68,7 @@ def sanitize_model_output(raw_text: str, strip_fences: bool = True) -> Sanitized
 
     Args:
         raw_text: The raw string response from the model.
-        strip_fences: Whether to strip markdown ```...``` fences.
+        strip_fences: Whether to strip outermost markdown ```...``` fences.
 
     Returns:
         SanitizedOutput instance containing clean_text and thought.

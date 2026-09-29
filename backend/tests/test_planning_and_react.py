@@ -222,3 +222,30 @@ async def test_react_agent_integrated_with_runtime_engine():
     turn_outcome = await engine.run(ctx)
     assert isinstance(turn_outcome, ReActResult)
     assert turn_outcome.final_reply == "Delivered through 8-phase engine"
+
+
+def test_doom_loop_gate_does_not_misclassify_different_tool_parameters():
+    """Verify that different tool queries under action_input do not trigger doom_loop."""
+    gate = DoomLoopGate(repetition_threshold=3)
+    history = [
+        {"action": "call_tool", "action_input": {"tool_name": "search", "query": "2022"}},
+        {"action": "call_tool", "action_input": {"tool_name": "search", "query": "2023"}},
+        {"action": "call_tool", "action_input": {"tool_name": "search", "query": "2024"}},
+    ]
+    dec = gate.evaluate(iteration=3, history=history, ledger=None)
+    assert not dec.should_stop
+
+
+@pytest.mark.asyncio
+async def test_react_agent_respects_explicit_max_turns():
+    """Verify that max_turns hard limits iteration count."""
+    model = MockModel([
+        {"action": "call_tool", "action_input": {"tool_name": "test1"}},
+        {"action": "call_tool", "action_input": {"tool_name": "test2"}},
+        {"action": "final_reply", "action_input": {"reply": "finished"}},
+    ])
+    agent = ReActAgent(model=model)
+    res = await agent.execute_turn(HookContext(), max_turns=1)
+    assert res.iterations == 1
+    assert res.status == "max_iterations_exceeded"
+

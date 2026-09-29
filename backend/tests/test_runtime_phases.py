@@ -251,3 +251,68 @@ async def test_cancellation_triggers_on_error_and_finally():
     assert Phase.ON_ERROR in trace_phases
     assert Phase.FINALLY in trace_phases
     assert isinstance(ctx.error, asyncio.CancelledError)
+
+
+@pytest.mark.asyncio
+async def test_repeated_cancellation_preserves_cleanup():
+    """Verify that _shielded_cleanup finishes even under repeated cancellation."""
+    from genslide_agentscope.runtime.engine import _shielded_cleanup
+
+    cleanup_finished = False
+
+    async def long_cleanup():
+        nonlocal cleanup_finished
+        await asyncio.sleep(0.05)
+        cleanup_finished = True
+
+    async def runner():
+        coro = _shielded_cleanup(long_cleanup())
+        task = asyncio.create_task(coro)
+        await asyncio.sleep(0.01)
+        # First cancellation
+        task.cancel()
+        await asyncio.sleep(0.005)
+        # Second cancellation while cleaning up
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    await runner()
+    assert cleanup_finished is True
+
+
+@pytest.mark.asyncio
+async def test_finally_phase_best_effort_runs_all_cleanup_hooks():
+    """Verify that an exception in one FINALLY hook does not abort subsequent cleanup hooks."""
+    from genslide_agentscope.runtime.hooks import HookBase
+
+    critical_cleanup_run = False
+
+    class FailingHook(HookBase):
+        name = "failing_hook"
+        phase = Phase.FINALLY
+        priority = 90
+
+        async def run(self, ctx: HookContext):
+            raise RuntimeError("Audit logging failed")
+
+    class CriticalResourceHook(HookBase):
+        name = "critical_release_hook"
+        phase = Phase.FINALLY
+        priority = 10
+
+        async def run(self, ctx: HookContext):
+            nonlocal critical_cleanup_run
+            critical_cleanup_run = True
+            return HookResult()
+
+    engine = RuntimeEngine()
+    engine.register_hook(FailingHook())
+    engine.register_hook(CriticalResourceHook())
+
+    ctx = HookContext()
+    await engine.run(ctx)
+    assert critical_cleanup_run is True
+

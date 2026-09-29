@@ -149,3 +149,27 @@ def test_singleton_capability_cache():
     c1 = get_capability_cache()
     c2 = get_capability_cache()
     assert c1 is c2
+
+
+def test_json_verbatim_fidelity_for_code_blocks_and_tags():
+    """Verify that inner markdown code blocks and think tags are preserved verbatim."""
+    import json
+    from genslide_agentscope.model import decode_output
+
+    # 1. Inner code block
+    v1 = {"effect": "reply", "reply": "示例：\n```python\nprint(1)\n```"}
+    raw1 = json.dumps(v1, ensure_ascii=False)
+    assert loads_repaired(raw1) == v1
+    assert decode_output(raw1) == v1
+
+    # 2. Inner think tags
+    v2 = {"effect": "reply", "reply": "请原样保留 <think>示例文本</think> 标签"}
+    raw2 = json.dumps(v2, ensure_ascii=False)
+    assert loads_repaired(raw2) == v2
+    assert decode_output(raw2) == v2
+
+    # 3. Outer fences around legitimate inner fences
+    wrapped = "```json\n" + raw1 + "\n```"
+    assert loads_repaired(wrapped) == v1
+    assert decode_output(wrapped) == v1
+

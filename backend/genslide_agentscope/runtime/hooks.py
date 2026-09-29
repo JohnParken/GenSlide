@@ -141,6 +141,24 @@ class HookRegistry:
         sorted_hooks = self._topo_sort(hooks)
         result = HookResult(action=HookAction.CONTINUE)
 
+        if phase == Phase.FINALLY:
+            # Best-effort execution for FINALLY cleanup hooks:
+            # An error in one hook must NOT prevent subsequent cleanup hooks from running!
+            first_exc: Exception | None = None
+            for hook in sorted_hooks:
+                try:
+                    res = await hook.run(ctx)
+                    if res.metadata:
+                        ctx.extras.update(res.metadata)
+                except Exception as exc:
+                    logger.error("Cleanup hook %s failed in phase finally: %s", hook.name, exc)
+                    if first_exc is None:
+                        first_exc = exc
+            if first_exc is not None:
+                ctx.error = first_exc
+                raise first_exc
+            return result
+
         for hook in sorted_hooks:
             try:
                 res = await hook.run(ctx)

@@ -108,12 +108,16 @@ class Memory(StrictModel):
     skill_id: str | None = Field(default=None, max_length=128)
     skill_version: str | None = Field(default=None, max_length=64)
     skill_hash: str | None = Field(default=None, max_length=128)
+    last_reply: str | None = Field(default=None, max_length=4000)
+    pending_options: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def whitelist_requirements(self):
         allowed = {"topic", "audience", "language", "length", "style", "purpose", "constraints"}
         if set(self.requirements) - allowed or any(len(v) > 2000 for v in self.requirements.values()):
             raise ValueError("invalid retained requirements")
+        if any(len(k) > 100 or len(v) > 500 for k, v in self.pending_options.items()):
+            raise ValueError("invalid pending options format")
         return self
 
 class Section(StrictModel):
@@ -132,11 +136,7 @@ Memory.model_rebuild()
 
 
 class ExecutionSnapshot(StrictModel):
-    """Trusted BFF snapshot: only state needed to continue a turn.
-
-    Conversation guidance and confirmation markers are intentionally excluded.  The BFF
-    owns lifecycle/session arbitration; this object is a bounded data handoff, not authority.
-    """
+    """Trusted BFF snapshot: bounded state needed to continue a multi-turn conversation."""
 
     schema_version: Literal[1] = 1
     target_kind: Kind | None = None
@@ -147,12 +147,16 @@ class ExecutionSnapshot(StrictModel):
     skill_id: str | None = Field(default=None, max_length=128)
     skill_version: str | None = Field(default=None, max_length=64)
     skill_hash: str | None = Field(default=None, max_length=128)
+    last_reply: str | None = Field(default=None, max_length=4000)
+    pending_options: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_snapshot(self):
         allowed = {"topic", "audience", "language", "length", "style", "purpose", "constraints"}
         if set(self.requirements) - allowed or any(len(v) > 2000 for v in self.requirements.values()):
             raise ValueError("invalid snapshot requirements")
+        if any(len(k) > 100 or len(v) > 500 for k, v in self.pending_options.items()):
+            raise ValueError("invalid pending options format in snapshot")
         if self.outline is not None:
             if "confirmed_hash" in self.outline or "guidance" in self.outline:
                 raise ValueError("snapshot contains transient outline state")
@@ -177,12 +181,30 @@ def snapshot_from_memory(memory: Memory) -> dict[str, Any]:
         skill_id=memory.skill_id,
         skill_version=memory.skill_version,
         skill_hash=memory.skill_hash,
+        last_reply=memory.last_reply,
+        pending_options=memory.pending_options,
     )
     return value.model_dump(exclude_none=True)
 
 
 def memory_from_snapshot(snapshot: Mapping[str, Any]) -> Memory:
     """Restore only the whitelisted fields from a claim-provided snapshot."""
+    checked = ExecutionSnapshot.model_validate(snapshot)
+    outline = None
+    if checked.outline is not None:
+        outline = Outline.model_validate(checked.outline)
+    return Memory(
+        target_kind=checked.target_kind,
+        requirements=checked.requirements,
+        outline=outline,
+        content=checked.content,
+        content_hash=checked.content_hash,
+        skill_id=checked.skill_id,
+        skill_version=checked.skill_version,
+        skill_hash=checked.skill_hash,
+        last_reply=checked.last_reply,
+        pending_options=checked.pending_options,
+    )
     checked = ExecutionSnapshot.model_validate(snapshot)
     outline = None
     if checked.outline is not None:

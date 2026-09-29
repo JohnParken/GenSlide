@@ -64,6 +64,9 @@ class ChatClient:
                       "session_version": begun["session_version"], "receipt": begun.get("receipt"),
                       "effect": stored["effect"], "result": stored.get("result", {}),
                       "content": stored.get("content"), "files": stored.get("files", [])}
+        elif begun.get("status") == "closed":
+            reason = begun.get("settle_reason") or "ACTION_CLOSED"
+            raise ChatClientError(f"Action 已终态关闭 ({reason})，不可重试", status=409, code="ACTION_CLOSED")
         else:
             authorized = dict(request)
             authorized.update(begun.get("request", begun))
