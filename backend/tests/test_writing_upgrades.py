@@ -214,6 +214,71 @@ async def test_analysis_comparison_question_is_not_adopted_as_requirement(tmp_pa
     assert "style" not in res.memory.requirements
 
 
+@pytest.mark.asyncio
+async def test_length_inquiry_does_not_overwrite_existing_length(tmp_path):
+    """Verify that inquiry like '文章写500字还是1000字更合适？' does not overwrite existing length."""
+    skills = writing_skills(tmp_path)
+    mem = Memory(requirements={"length": "800字"})
+    model = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing"},
+        {"effect": "reply", "reply": "500字和1000字各有优劣..."},
+    )
+    res = await execute(req(message="文章写500字还是1000字更合适？"), mem, "", model, skills)
+
+    # Must retain 800字, not overwritten by 1000字!
+    assert res.memory.requirements.get("length") == "800字"
+
+
+@pytest.mark.asyncio
+async def test_compound_sentence_inquiry_on_one_field_does_not_block_other_clear_fields(tmp_path):
+    """Verify that a style inquiry does not block clear audience requirement in compound sentences."""
+    skills = writing_skills(tmp_path)
+    mem = Memory(
+        last_reply="请选择风格：1. 商务正式 2. 轻松幽默",
+        pending_options={"1": "商务正式", "2": "轻松幽默"},
+    )
+    model = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing",
+         "requirement_updates": {"audience": "高中生", "style": "轻松幽默"}},
+        {"effect": "reply", "reply": "好的，针对高中生群体分析风格..."},
+    )
+    res = await execute(req(message="写一篇面向高中生的科普文章，商务正式还是轻松幽默哪个好？"), mem, "", model, skills)
+
+    # audience must be adopted because the clause is clear and unambiguous
+    assert res.memory.requirements.get("audience") == "高中生"
+    # style must not be adopted because it is in an ambiguous comparative question
+    assert "style" not in res.memory.requirements
+
+
+@pytest.mark.asyncio
+async def test_polite_task_request_and_directive_are_accepted(tmp_path):
+    """Verify that polite task request and directive '还是用轻松幽默好了' are accepted."""
+    skills = writing_skills(tmp_path)
+    mem = Memory(
+        last_reply="请选择风格：1. 商务正式 2. 轻松幽默",
+        pending_options={"1": "商务正式", "2": "轻松幽默"},
+    )
+
+    # 1. Polite task request: "请写一篇人工智能与传统算法的对比，可以吗？"
+    model1 = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing",
+         "requirement_updates": {"topic": "人工智能与传统算法的对比"}},
+        {"effect": "reply", "reply": "没问题，可以为您写这篇对比文章。"},
+    )
+    res1 = await execute(req(message="请写一篇人工智能与传统算法的对比，可以吗？"), mem, "", model1, skills)
+    assert res1.memory.requirements.get("topic") == "人工智能与传统算法的对比"
+
+    # 2. Directive: "还是用轻松幽默好了"
+    model2 = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing",
+         "requirement_updates": {"style": "轻松幽默"}},
+        {"effect": "reply", "reply": "好的，采用轻松幽默风格。"},
+    )
+    res2 = await execute(req(message="还是用轻松幽默好了"), mem, "", model2, skills)
+    assert res2.memory.requirements.get("style") == "轻松幽默"
+
+
+
 
 
 

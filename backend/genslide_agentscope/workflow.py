@@ -65,41 +65,59 @@ def _is_ambiguous_comparison_question(msg: str) -> bool:
     """Detect whether user input is an ambiguous comparative inquiry rather than an affirmative directive.
 
     Inquiry features take strict precedence over topic exemptions so that questions like
-    '请分析商务正式和轻松幽默的对比，哪个更适合？' are never mistaken for confirmed affirmative choices.
+    '请分析商务正式和轻松幽默的对比，哪个更适合？' are never mistaken for confirmed affirmative choices,
+    while polite task requests ('请写一篇...的对比，可以吗？') and clear decisions ('还是用轻松幽默好了')
+    are preserved as affirmative.
     """
     if not msg:
         return False
     text = msg.strip()
 
-    # 1. Genuine comparative inquiry phrases MUST BE CHECKED FIRST!
+    # 1. Exempt polite task request wrappers for writing topics:
+    # E.g. "请写一篇人工智能与传统算法的对比，可以吗？"
+    is_writing_topic_request = bool(
+        re.search(r"^(?:请|麻烦|帮我)?\s*(?:写|作|撰写|生成|输出|制作)\s*(?:一篇|一个|份)?.*(?:对比|比较)", text)
+    )
+    if is_writing_topic_request:
+        if re.search(r"(?:，|,)?\s*(?:可以|行|好|能|麻烦)?\s*(?:吗|呢|么)\s*[？?]?\s*$", text):
+            if not re.search(r"(?:还是|或者|哪个|哪种|怎么选|如何选)", text):
+                return False
+
+    # 2. Check affirmative decision directives (e.g. "还是用轻松幽默好了", "还是选A吧")
+    if re.search(r"(?:还是|就|按|请|决定)\s*(?:用|选|按|采用|以|决定)", text):
+        if not re.search(r"(?:哪个|哪种|哪一个|怎么选|如何选|区别|对比一下)", text):
+            return False
+
+    if re.search(r"(?:吧|即可|就行|好了)$", text):
+        if not re.search(r"(?:哪个|哪种|哪一个|怎么选|如何选|区别|对比一下)", text):
+            return False
+
+    # 3. Genuine comparative inquiry phrases
     inquiry_phrases = (
-        "哪个好", "哪一个好", "哪个适合", "哪个更适合", "哪种更好", "怎么选",
-        "有什么区别", "有什么不同", "区别在哪", "对比一下", "哪个更", "选哪一个", "选哪个"
+        "哪个好", "哪一个好", "哪个适合", "哪个更适合", "哪种更好", "怎么选", "如何选", "如何选择", "怎么选择",
+        "有什么区别", "有什么不同", "区别在哪", "对比一下", "哪个更", "选哪一个", "选哪个",
+        "哪种更", "哪个更优"
     )
     if any(p in text for p in inquiry_phrases):
         return True
 
-    # Comparative evaluation: "还是/或者...好/更/适合"
-    if re.search(r"(?:还是|或者).*(?:好|更好|适合|优)", text):
+    # Comparative evaluation: "还是/或者...哪个好/更好/更适合/好(not 好了)"
+    if re.search(r"(?:还是|或者).*(?:更好|更适合|更优|哪个好|比较好|(?:[一二三四1-4A-Za-z]|个|项|种)?\s*好(?![了好的]))", text):
         return True
 
-    # Questions containing alternatives or comparative words with question marks/particles
-    is_question = any(q in text for q in ("？", "?", "吗", "呢", "如何", "怎样"))
-    has_comparison_or_alternative = any(a in text for a in ("还是", "或者", "对比", "比较", "区别", "哪"))
-    if is_question and has_comparison_or_alternative:
-        return True
-
-    # 2. Only if NO inquiry features matched, exempt affirmative directives and legitimate topics
-    if re.search(r"(?:还是|就|按|请|决定)\s*(?:用|选|按|采用|以|决定)", text):
-        return False
-    if re.search(r"(?:吧|即可|就行|好了)$", text):
-        return False
-
-    # Exempt document/article topic requests discussing comparisons
+    # 4. Pure content topics discussing comparisons (e.g. "写一篇人工智能与传统算法的对比")
     if re.search(r"(?:写|作|撰写|分析|生成|输出|制作|关于).*(?:对比|比较)", text):
-        return False
+        if not re.search(r"(?:还是|或者|哪个|选哪|如何选|怎么选)", text):
+            return False
     if re.search(r"(?:对比|比较).*(?:分析|研究|报告|文章|总结)", text):
-        return False
+        if not re.search(r"(?:还是|或者|哪个|选哪|如何选|怎么选)", text):
+            return False
+
+    # 5. Questions containing alternatives with question marks or alternative conjunctions
+    is_question = any(q in text for q in ("？", "?", "吗", "呢", "如何", "怎样"))
+    has_alternative = any(a in text for a in ("还是", "或者"))
+    if is_question and has_alternative:
+        return True
 
     return False
 
@@ -197,17 +215,15 @@ def _is_requirement_affirmed(user_msg: str, val: str, pending_options: dict[str,
 
     Ensures that values mentioned in negative contexts ('别用轻松幽默') or ambiguous
     comparison questions ('商务正式还是轻松幽默哪个好') are strictly rejected,
-    while legitimate directives ('还是用轻松幽默吧') and topics ('...对比') are accepted.
+    while legitimate directives ('还是用轻松幽默吧'), topics ('...对比'), and independent
+    unambiguous clauses in compound sentences ('写一篇面向高中生的科普文章，商务正式还是轻松幽默哪个好？')
+    are accepted.
     """
     if not user_msg or not val:
         return False
     msg = user_msg.strip()
 
-    # 1. Reject ambiguous comparison questions
-    if _is_ambiguous_comparison_question(msg):
-        return False
-
-    # 2. Check if val matches a pending option
+    # 1. Check if val matches a pending option
     matched_opt_key = None
     for opt_key, opt_val in pending_options.items():
         if opt_val == val:
@@ -217,16 +233,25 @@ def _is_requirement_affirmed(user_msg: str, val: str, pending_options: dict[str,
     if matched_opt_key is not None:
         return _is_option_selected(msg, matched_opt_key, val, pending_options)
 
-    # 3. For custom user requirement not originating from pending_options:
-    # Must be a verbatim substring in user_msg, but MUST NOT be negated
+    # 2. For custom user requirement not originating from pending_options:
+    # Must be a verbatim substring in user_msg
     if val not in msg:
+        return False
+
+    # Perform field-scoped disambiguation: extract the specific clause(s) in which val appears
+    clauses = [c.strip() for c in re.split(r"[,，;；\n]", msg) if c.strip()]
+    val_clauses = [c for c in clauses if val in c]
+    target_scope = " ".join(val_clauses) if val_clauses else msg
+
+    # If the specific clause containing val contains an ambiguous comparison inquiry, reject
+    if _is_ambiguous_comparison_question(target_scope):
         return False
 
     negation_regex = re.compile(
         rf"(?:不|别|不要|无需|排除|免去|取消|并非)\s*(?:想|要|选|用|采纳|考虑|以)?\s*{re.escape(val)}",
         flags=re.IGNORECASE
     )
-    if negation_regex.search(msg):
+    if negation_regex.search(target_scope):
         return False
 
     return True
@@ -379,7 +404,7 @@ Never infer a confirmed requirement out of nowhere.
     if decision.needs_full_content and memory.content is None:
         raise ServiceError("CURRENT_CONTENT_REQUIRED", 422)
     stated = explicit_length(request.message)
-    if stated is not None:
+    if stated is not None and _is_requirement_affirmed(request.message, stated, memory.pending_options):
         memory.requirements["length"] = stated
     prompt = BASE + "\n" + skill["content"] + """
 Return only the requested effect schema. Fulfil this user turn without imposing fixed workflow steps.
