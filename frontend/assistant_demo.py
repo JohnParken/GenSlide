@@ -39,6 +39,16 @@ if pending:
         retry = st.button("重试原请求")
     with col2:
         if st.button("放弃上次请求并重新输入"):
+            recovered = None
+            try:
+                recovered = client.reconcile(pending, state=state)
+            except Exception:
+                pass
+            if recovered:
+                reply = recovered.get("reply") or recovered.get("result", {}).get("reply") or "本轮已完成。"
+                st.session_state.assistant_messages.extend([("user", pending["message"]), ("assistant", reply)])
+                for ref in recovered.get("files", []):
+                    st.session_state.assistant_files[ref["file_id"]] = ref
             st.session_state.assistant_pending = None
             st.rerun()
 else:

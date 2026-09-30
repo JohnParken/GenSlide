@@ -1,15 +1,11 @@
 """Reasoning and output sanitization for LLM responses.
 
 Carefully preserves legitimate markdown code blocks and internal content,
-while cleanly separating <think> tags and outer conversational markdown fences.
+while cleanly separating outer <think> tags and outer conversational markdown fences.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
-
-_THINK_PAIR_PATTERN = re.compile(r"<think>(.*?)</think>", flags=re.DOTALL | re.IGNORECASE)
-_THINK_OPEN_PATTERN = re.compile(r"<think>(.*)", flags=re.DOTALL | re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,27 +18,37 @@ class SanitizedOutput:
 
 
 def extract_thought(raw_text: str) -> tuple[str, str]:
-    """Extract <think> tags from text, returning (clean_text, thought_text)."""
+    """Extract outer <think> tag if present before any JSON payload or in plain text responses.
+
+    Preserves <think> tags that reside inside valid JSON payloads.
+    """
     if not raw_text or "<think>" not in raw_text.lower():
         return raw_text, ""
 
-    thoughts: list[str] = []
+    first_brace = raw_text.find("{")
+    first_bracket = raw_text.find("[")
+    json_candidates = [p for p in (first_brace, first_bracket) if p != -1]
+    first_json = min(json_candidates) if json_candidates else -1
 
-    def _replace_pair(match: re.Match) -> str:
-        thoughts.append(match.group(1).strip())
-        return ""
+    think_start = raw_text.lower().find("<think>")
+    if first_json != -1 and think_start > first_json:
+        # <think> tag is inside the JSON structure; preserve verbatim
+        return raw_text, ""
 
-    # 1. Replace closed pairs
-    cleaned = _THINK_PAIR_PATTERN.sub(_replace_pair, raw_text)
+    # Look for the FIRST <think>...</think> pair that precedes JSON
+    think_end = raw_text.lower().find("</think>", think_start)
+    if think_end != -1 and (first_json == -1 or think_end < first_json):
+        thought = raw_text[think_start + 7 : think_end].strip()
+        clean = (raw_text[:think_start] + raw_text[think_end + 8 :]).strip()
+        return clean, thought
 
-    # 2. Check for an unclosed <think> tag
-    unclosed_match = _THINK_OPEN_PATTERN.search(cleaned)
-    if unclosed_match:
-        thoughts.append(unclosed_match.group(1).strip())
-        cleaned = cleaned[:unclosed_match.start()]
+    # If unclosed <think> before JSON or in plain text
+    if first_json == -1 or think_start < first_json:
+        thought = raw_text[think_start + 7 :].strip()
+        clean = raw_text[:think_start].strip()
+        return clean, thought
 
-    thought_summary = "\n\n".join(t for t in thoughts if t)
-    return cleaned.strip(), thought_summary
+    return raw_text, ""
 
 
 def strip_markdown_fences(text: str) -> str:
@@ -64,7 +70,7 @@ def strip_markdown_fences(text: str) -> str:
 
 
 def sanitize_model_output(raw_text: str, strip_fences: bool = True) -> SanitizedOutput:
-    """Sanitize LLM output by separating thinking chain and stripping code fences.
+    """Sanitize LLM output by separating outer thinking chain and stripping outer code fences.
 
     Args:
         raw_text: The raw string response from the model.
@@ -76,7 +82,11 @@ def sanitize_model_output(raw_text: str, strip_fences: bool = True) -> Sanitized
     if not raw_text:
         return SanitizedOutput(raw="", clean_text="", thought="", has_thought=False)
 
-    clean_text, thought = extract_thought(raw_text)
+    text = raw_text
+    if strip_fences:
+        text = strip_markdown_fences(text)
+
+    clean_text, thought = extract_thought(text)
     has_thought = bool(thought.strip())
 
     if strip_fences:

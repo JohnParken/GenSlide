@@ -173,3 +173,14 @@ def test_json_verbatim_fidelity_for_code_blocks_and_tags():
     assert loads_repaired(wrapped) == v1
     assert decode_output(wrapped) == v1
 
+    # 4. Outer ```json around legitimate inner <think> tags (Issue 1 regression)
+    think_wrapped = "```json\n" + raw2 + "\n```"
+    assert loads_repaired(think_wrapped) == v2
+    assert decode_output(think_wrapped) == v2
+
+    # 5. Preceding outer thought + ```json wrapper + inner <think> tag
+    complex_wrap = "<think>Generating reply</think>\n```json\n" + raw2 + "\n```"
+    assert loads_repaired(complex_wrap) == v2
+    assert decode_output(complex_wrap) == v2
+
+

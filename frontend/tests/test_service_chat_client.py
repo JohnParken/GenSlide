@@ -79,3 +79,38 @@ def test_list_skills_and_reload_skills():
         assert len(reloaded) == 1
         assert reloaded[0]["skill_id"] == "s1"
 
+
+def test_reconcile_recovers_committed_result_and_updates_version():
+    class Reply:
+        headers = type("H", (), {"get_content_type": lambda self: "application/json"})()
+        def __init__(self, data): self.data = data
+        def read(self): return json.dumps(self.data).encode()
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+
+    committed_resp = {
+        "status": "committed",
+        "session_version": 2,
+        "receipt": {"action_id": "act_123"},
+        "result": {
+            "effect": "reply",
+            "result": {"reply": "恢复的成果"},
+            "content": {"title": "恢复的文章", "sections": []},
+            "files": [{"file_id": "f_1", "filename": "test.docx"}],
+        },
+    }
+
+    client = ChatClient("http://bff", "http://service", "token")
+    state = ChatState(session_version=1)
+    pending = {"action_id": "act_123", "message": "生成文章"}
+
+    with patch("frontend.service_chat_client.urlopen", return_value=Reply(committed_resp)):
+        recovered = client.reconcile(pending, state=state)
+
+    assert recovered is not None
+    assert recovered["status"] == "completed"
+    assert state.session_version == 2
+    assert state.answer == "恢复的成果"
+    assert state.content["title"] == "恢复的文章"
+    assert len(state.artifacts) == 1
+

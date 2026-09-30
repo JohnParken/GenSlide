@@ -81,6 +81,49 @@ class ChatClient:
         state.artifacts = result.get("files", [])
         return result
 
+    def reconcile(self, pending: dict[str, Any], *, state: ChatState) -> dict[str, Any] | None:
+        """Reconcile an unconfirmed action with BFF to avoid state drift or version conflict.
+
+        If already committed on BFF, synchronizes session_version, recovers result, and returns it.
+        If still pending/closed, synchronizes latest session_version and allows safe clearing.
+        """
+        request = {
+            "api_contract_version": "1", "engine": state.engine,
+            "tenant_id": self.tenant_id, "user_id": self.user_id,
+            "session_id": state.session, "runtime_epoch": state.runtime_epoch,
+            "action_id": pending["action_id"], "authorization": self.token,
+            "expected_session_version": state.session_version,
+            "expected_lifecycle_version": state.lifecycle_version,
+            "mode": "assistant", "message": pending.get("message", ""),
+            "requested_output": pending.get("requested_output", "auto"),
+            "requested_skill_id": pending.get("requested_skill_id"),
+            "current_file_ids": list(pending.get("current_file_ids", [])),
+        }
+        try:
+            begun = self._request(self.bff_url, "dev/begin", payload=request)
+            if begun.get("status") == "committed":
+                stored = begun["result"]
+                result = {
+                    "status": "completed", "action_id": pending["action_id"],
+                    "session_version": begun["session_version"], "receipt": begun.get("receipt"),
+                    "effect": stored["effect"], "result": stored.get("result", {}),
+                    "content": stored.get("content"), "files": stored.get("files", []),
+                }
+                state.session_version = result["session_version"]
+                payload = result.get("result", {})
+                state.answer = result.get("reply") or payload.get("reply", "")
+                if payload.get("outline") is not None:
+                    state.draft = payload["outline"]
+                if result.get("content") is not None:
+                    state.content = result["content"]
+                state.artifacts = result.get("files", [])
+                return result
+            if "session_version" in begun:
+                state.session_version = max(state.session_version, begun["session_version"])
+        except Exception:
+            pass
+        return None
+
     def _request(self, base: str, path: str, *, method="POST", payload=None, raw=None, headers=None):
         data = raw if raw is not None else (json.dumps(payload or {}).encode() if payload is not None else None)
         hdrs = {"Authorization": f"Bearer {self.token}"}

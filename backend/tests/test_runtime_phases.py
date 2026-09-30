@@ -316,3 +316,41 @@ async def test_finally_phase_best_effort_runs_all_cleanup_hooks():
     await engine.run(ctx)
     assert critical_cleanup_run is True
 
+
+@pytest.mark.asyncio
+async def test_finally_phase_handles_cancelled_error_and_runs_all_hooks():
+    """Verify that asyncio.CancelledError in a FINALLY hook does not abort subsequent cleanup hooks."""
+    from genslide_agentscope.runtime.hooks import HookBase, HookRegistry
+
+    critical_cleanup_run = False
+
+    class CancellingHook(HookBase):
+        name = "cancelling_hook"
+        phase = Phase.FINALLY
+        priority = 90
+
+        async def run(self, ctx: HookContext):
+            raise asyncio.CancelledError()
+
+    class CriticalResourceHook(HookBase):
+        name = "critical_release_hook"
+        phase = Phase.FINALLY
+        priority = 10
+
+        async def run(self, ctx: HookContext):
+            nonlocal critical_cleanup_run
+            critical_cleanup_run = True
+            return HookResult()
+
+    reg = HookRegistry()
+    reg.register(CancellingHook())
+    reg.register(CriticalResourceHook())
+
+    ctx = HookContext()
+    with pytest.raises(asyncio.CancelledError):
+        await reg.run_phase(Phase.FINALLY, ctx)
+
+    assert critical_cleanup_run is True
+    assert isinstance(ctx.error, asyncio.CancelledError)
+
+

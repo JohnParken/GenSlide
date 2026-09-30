@@ -143,17 +143,27 @@ class HookRegistry:
 
         if phase == Phase.FINALLY:
             # Best-effort execution for FINALLY cleanup hooks:
-            # An error in one hook must NOT prevent subsequent cleanup hooks from running!
-            first_exc: Exception | None = None
+            # An error or cancellation in one hook must NOT prevent subsequent cleanup hooks from running!
+            first_exc: BaseException | None = None
+            cancelled: bool = False
             for hook in sorted_hooks:
                 try:
                     res = await hook.run(ctx)
                     if res.metadata:
                         ctx.extras.update(res.metadata)
-                except Exception as exc:
+                except asyncio.CancelledError as exc:
+                    cancelled = True
+                    logger.warning("Cleanup hook %s cancelled in phase finally", hook.name)
+                    if first_exc is None:
+                        first_exc = exc
+                except BaseException as exc:
                     logger.error("Cleanup hook %s failed in phase finally: %s", hook.name, exc)
                     if first_exc is None:
                         first_exc = exc
+
+            if cancelled:
+                ctx.error = first_exc or asyncio.CancelledError()
+                raise asyncio.CancelledError()
             if first_exc is not None:
                 ctx.error = first_exc
                 raise first_exc

@@ -104,14 +104,25 @@ def repair_json(raw_text: str) -> str:
 
     trimmed = raw_text.strip()
 
-    # 1. Fast path: already valid JSON
+    # 1. Fast path 1: already valid pristine JSON
     try:
         json.loads(trimmed)
         return trimmed
     except Exception:
         pass
 
-    # 2. Try after outer sanitization (strip outer <think> and outer code fences)
+    # 2. Fast path 2: JSON wrapped only in outer markdown code fences (```...```)
+    # Strip fences immediately without touching internal <think> or tags
+    from .sanitizer import strip_markdown_fences
+    fenced = strip_markdown_fences(trimmed)
+    if fenced != trimmed:
+        try:
+            json.loads(fenced)
+            return fenced
+        except Exception:
+            pass
+
+    # 3. Outer sanitization: Strip outer thinking tags and outermost code fences
     sanitized = sanitize_model_output(trimmed)
     clean = sanitized.clean_text.strip()
     try:
@@ -173,13 +184,23 @@ def loads_repaired(raw_text: str) -> Any:
 
     trimmed = raw_text.strip()
 
-    # 1. Fast path: Direct strict parse on unmodified string (zero pollution)
+    # 1. Fast path 1: Direct strict parse on unmodified string (zero pollution)
     try:
         return json.loads(trimmed)
     except Exception:
         pass
 
-    # 2. Outer sanitization: Strip outer thinking tags and outermost code fences
+    # 2. Fast path 2: Direct parse after stripping outermost markdown ```...``` fences ONLY
+    # This guarantees that legitimate <think> tags occurring inside wrapped JSON strings are 100% preserved!
+    from .sanitizer import strip_markdown_fences
+    fenced = strip_markdown_fences(trimmed)
+    if fenced != trimmed:
+        try:
+            return json.loads(fenced)
+        except Exception:
+            pass
+
+    # 3. Outer sanitization: Strip outer thinking tags and outermost code fences
     sanitized = sanitize_model_output(trimmed)
     clean = sanitized.clean_text.strip()
     try:

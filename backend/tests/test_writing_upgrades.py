@@ -61,6 +61,31 @@ async def test_multi_turn_continuity_with_pending_options(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_unselected_pending_option_is_not_adopted_when_user_switches_topic(tmp_path):
+    skills = writing_skills(tmp_path)
+    mem = Memory(
+        last_reply="请选择风格：1. 商务正式 2. 轻松幽默",
+        pending_options={"1": "商务正式", "2": "轻松幽默"},
+    )
+    # User switches topic instead of selecting an option
+    # Model mistakenly or hallucinatorily suggests adopting "轻松幽默"
+    model = Model(
+        {
+            "effect": "reply",
+            "target_kind": "writing",
+            "skill_id": "writing",
+            "requirement_updates": {"style": "轻松幽默"},
+        },
+        {"effect": "reply", "reply": "好的，我们聊聊周末去哪玩。"},
+    )
+    result = await execute(req(message="换个话题，我想聊聊周末去哪玩"), mem, "", model, skills)
+
+    # Verify: style must NOT be adopted as a confirmed requirement!
+    assert "style" not in result.memory.requirements
+
+
+
+@pytest.mark.asyncio
 async def test_large_content_local_edit_does_not_blow_context_budget(tmp_path):
     from genslide_agentscope.domain import Section
     from genslide_agentscope.model import encode_payload
@@ -117,4 +142,58 @@ async def test_large_content_local_edit_does_not_blow_context_budget(tmp_path):
     assert res.content.sections[0].body == "中" * 8000
     assert res.content.sections[1].body == "更新后的第2章内容"
     assert res.content.sections[2].body == "中" * 8000
+
+
+@pytest.mark.asyncio
+async def test_dynamic_budget_allocation_with_8000_char_section_and_huge_materials(tmp_path):
+    from genslide_agentscope.domain import Section
+    from genslide_agentscope.model import encode_payload
+
+    # Target section: 8000 Chinese chars (~24KB)
+    large_content = Content(
+        title="大型技术规划报告",
+        sections=[Section(title="架构详述", body="中" * 8000)],
+    )
+    skills = writing_skills(tmp_path)
+    mem = Memory(
+        content=large_content,
+        content_hash=content_hash(large_content),
+        target_kind="writing",
+        skill_id="writing",
+        skill_version=skills.skills["writing"]["version"],
+        skill_hash=skills.skills["writing"]["hash"],
+    )
+
+    # Long materials: 20000 Chinese chars (~60KB alone)
+    huge_materials = "材" * 20000
+
+    model = Model(
+        {
+            "effect": "deliverable",
+            "target_kind": "writing",
+            "skill_id": "writing",
+            "needs_full_content": False,
+            "edit_scope": ["架构详述"],
+            "user_visible_assumptions": [],
+        },
+        {
+            "effect": "deliverable",
+            "deliverable": {
+                "title": "大型技术规划报告",
+                "sections": [{"title": "架构详述", "body": "按截取材料精炼后的架构详述"}],
+            },
+        },
+    )
+
+    res = await execute(req(message="参考材料优化架构详述"), mem, huge_materials, model, skills)
+    compose_payload = model.calls[1]
+
+    # Verify total bytes strictly <= 60000 bytes, avoiding 413
+    encoded = encode_payload(compose_payload)
+    assert len(encoded.encode("utf-8")) <= 58000
+
+    # Verify mandatory user disclosure in assumptions
+    assumptions = res.result.get("user_visible_assumptions", [])
+    assert any("参考材料已按安全预算做有界截取" in a for a in assumptions)
+
 
