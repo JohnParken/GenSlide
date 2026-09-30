@@ -100,9 +100,12 @@ class CompletionRubricGate:
         if ledger is None or not ledger.is_all_completed():
             return GateDecision(should_stop=False)
 
+        def _norm_action(step: dict[str, Any]) -> str:
+            return str(step.get("action") or "").strip().lower()
+
         # Stop immediately only if a VALID user-facing final reply with non-empty content was delivered
         def _is_valid_final_reply_step(step: dict[str, Any]) -> bool:
-            if step.get("action") != "final_reply":
+            if _norm_action(step) != "final_reply":
                 return False
             params = step.get("action_input")
             if params is None:
@@ -126,7 +129,7 @@ class CompletionRubricGate:
             # If this is the immediate next step after task completion, allow one summary step
             # Find the step index where ledger became all-completed
             # We allow 1 follow-up turn to deliver the summary reply
-            update_steps = [i for i, step in enumerate(history) if step.get("action") == "update_task"]
+            update_steps = [i for i, step in enumerate(history) if _norm_action(step) == "update_task"]
             last_update_idx = update_steps[-1] if update_steps else -1
             steps_after_completion = len(history) - (last_update_idx + 1)
 
@@ -135,7 +138,7 @@ class CompletionRubricGate:
                 return GateDecision(should_stop=False)
 
             # Allow 1 recovery turn if the agent attempted final_reply but needs to fix missing reply content
-            if steps_after_completion == 1 and history and history[-1].get("action") == "final_reply":
+            if steps_after_completion == 1 and history and _norm_action(history[-1]) == "final_reply":
                 return GateDecision(should_stop=False)
 
             return GateDecision(

@@ -64,14 +64,32 @@ SUFFIX_BOUND = r"(?:$|[\s,，。；;、项个种吧啦]|[^\w])"
 def _is_ambiguous_comparison_question(msg: str) -> bool:
     """Detect whether user input is an ambiguous comparative inquiry rather than an affirmative directive.
 
-    Explicit decisions ('还是用轻松幽默吧', '还是选A') and legitimate content topics
-    ('写一篇人工智能与传统算法的对比') are strictly exempt from being rejected.
+    Inquiry features take strict precedence over topic exemptions so that questions like
+    '请分析商务正式和轻松幽默的对比，哪个更适合？' are never mistaken for confirmed affirmative choices.
     """
     if not msg:
         return False
     text = msg.strip()
 
-    # 1. Exempt affirmative directives and final choice phrasing
+    # 1. Genuine comparative inquiry phrases MUST BE CHECKED FIRST!
+    inquiry_phrases = (
+        "哪个好", "哪一个好", "哪个适合", "哪个更适合", "哪种更好", "怎么选",
+        "有什么区别", "有什么不同", "区别在哪", "对比一下", "哪个更", "选哪一个", "选哪个"
+    )
+    if any(p in text for p in inquiry_phrases):
+        return True
+
+    # Comparative evaluation: "还是/或者...好/更/适合"
+    if re.search(r"(?:还是|或者).*(?:好|更好|适合|优)", text):
+        return True
+
+    # Questions containing alternatives or comparative words with question marks/particles
+    is_question = any(q in text for q in ("？", "?", "吗", "呢", "如何", "怎样"))
+    has_comparison_or_alternative = any(a in text for a in ("还是", "或者", "对比", "比较", "区别", "哪"))
+    if is_question and has_comparison_or_alternative:
+        return True
+
+    # 2. Only if NO inquiry features matched, exempt affirmative directives and legitimate topics
     if re.search(r"(?:还是|就|按|请|决定)\s*(?:用|选|按|采用|以|决定)", text):
         return False
     if re.search(r"(?:吧|即可|就行|好了)$", text):
@@ -82,24 +100,6 @@ def _is_ambiguous_comparison_question(msg: str) -> bool:
         return False
     if re.search(r"(?:对比|比较).*(?:分析|研究|报告|文章|总结)", text):
         return False
-
-    # 2. Genuine comparative inquiry phrases
-    inquiry_phrases = (
-        "哪个好", "哪一个好", "哪个适合", "哪种更好", "怎么选",
-        "有什么区别", "有什么不同", "区别在哪", "对比一下", "哪个更"
-    )
-    if any(p in text for p in inquiry_phrases):
-        return True
-
-    # Comparative questions with alternatives followed by preference evaluation
-    if re.search(r"(?:还是|或者).*(?:好|更好|适合|优)", text):
-        return True
-
-    # 3. Questions containing alternative options with question particles
-    is_question = any(q in text for q in ("？", "?", "吗", "呢", "如何"))
-    has_alternative = any(a in text for a in ("还是", "或者"))
-    if is_question and has_alternative:
-        return True
 
     return False
 

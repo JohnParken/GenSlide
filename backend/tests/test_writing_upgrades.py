@@ -195,6 +195,26 @@ async def test_explicit_directive_and_topic_comparison_accepted(tmp_path):
     assert res2.memory.requirements.get("style") == "轻松幽默"
 
 
+@pytest.mark.asyncio
+async def test_analysis_comparison_question_is_not_adopted_as_requirement(tmp_path):
+    """Verify that inquiry like '请分析商务正式和轻松幽默的对比，哪个更适合？' is NOT adopted."""
+    skills = writing_skills(tmp_path)
+    mem = Memory(
+        last_reply="请选择风格：1. 商务正式 2. 轻松幽默",
+        pending_options={"1": "商务正式", "2": "轻松幽默"},
+    )
+    model = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing",
+         "requirement_updates": {"style": "轻松幽默"}},
+        {"effect": "reply", "reply": "商务正式和轻松幽默的对比如下..."},
+    )
+    res = await execute(req(message="请分析商务正式和轻松幽默的对比，哪个更适合？"), mem, "", model, skills)
+
+    # Must NOT adopt 'style' because this is an inquiry question comparing options
+    assert "style" not in res.memory.requirements
+
+
+
 
 
 @pytest.mark.asyncio

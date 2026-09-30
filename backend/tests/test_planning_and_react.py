@@ -342,5 +342,35 @@ async def test_react_agent_with_ledger_fails_when_recovery_turns_exhausted():
     assert res.iterations == 2
 
 
+@pytest.mark.asyncio
+async def test_react_agent_with_whitespace_and_cased_final_reply_recovers_successfully():
+    """Verify that action formatting like ' FINAL_REPLY ' does not prevent the agent from taking a recovery step."""
+    ledger = GoalLedger(goal="Ledger whitespace action test")
+    t = ledger.add_task("Subtask 1")
+    ledger.complete_task(t.task_id)
+
+    model = MockModel([
+        # Turn 1: model outputs " FINAL_REPLY " with uppercase and whitespace, missing reply
+        {
+            "thought": "All done",
+            "action": " FINAL_REPLY ",
+            "action_input": {},
+        },
+        # Turn 2: model fixes and outputs valid final_reply
+        {
+            "thought": "Providing proper answer",
+            "action": "final_reply",
+            "action_input": {"reply": "成功规范化并恢复的答复"},
+        },
+    ])
+    agent = ReActAgent(model=model)
+    res = await agent.execute_turn(HookContext(), ledger=ledger)
+
+    assert res.status == "completed"
+    assert res.final_reply == "成功规范化并恢复的答复"
+    assert res.iterations == 2
+
+
+
 
 

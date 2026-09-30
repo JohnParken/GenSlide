@@ -139,6 +139,7 @@ class ReActAgent:
             # 6. Execute action
             observation = ""
             action = step.action.strip().lower()
+            step.action = action  # Canonicalize action name in step object
 
             if action == "final_reply":
                 reply_val = step.action_input.get("reply")
