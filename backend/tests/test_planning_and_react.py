@@ -277,3 +277,33 @@ async def test_react_agent_does_not_leak_internal_thought_on_empty_reply():
     assert "requires a non-empty 'reply'" in res.history[0]["observation"]
 
 
+@pytest.mark.asyncio
+async def test_react_agent_with_ledger_does_not_prematurely_stop_on_invalid_final_reply():
+    """Verify that when tasks in ledger are all completed, an invalid empty final_reply does not cause premature gate stop."""
+    ledger = GoalLedger(goal="Ledger completion test")
+    t = ledger.add_task("Subtask A")
+    ledger.complete_task(t.task_id)
+
+    model = MockModel([
+        # Turn 1: invalid final_reply without reply parameter
+        {
+            "thought": "All tasks done, closing",
+            "action": "final_reply",
+            "action_input": {},
+        },
+        # Turn 2: Self-healing valid final_reply
+        {
+            "thought": "Delivering explicit user reply",
+            "action": "final_reply",
+            "action_input": {"reply": "经过核验交付的最终用户答复"},
+        },
+    ])
+    agent = ReActAgent(model=model)
+    res = await agent.execute_turn(HookContext(), ledger=ledger)
+
+    assert res.status == "completed"
+    assert res.final_reply == "经过核验交付的最终用户答复"
+    assert res.iterations == 2
+
+
+

@@ -63,28 +63,52 @@ def _is_option_selected(user_msg: str, key: str, val: str, all_options: dict[str
         return False
     msg = user_msg.strip()
 
-    # 1. Negative intent detection: If user explicitly rejects this option or value, reject immediately
+    # Determine 1-based position ordinal tokens if key is in all_options
+    pos_idx_str = None
+    try:
+        keys_list = list(all_options.keys())
+        if key in keys_list:
+            pos_idx_str = str(keys_list.index(key) + 1)
+    except Exception:
+        pass
+
+    # 1. Negative intent detection: Collect ALL canonical reference tokens (key, val, position ordinals)
     key_str = str(key)
     c_num = _CHINESE_NUMS.get(key_str, key_str)
-    tokens_to_check = [key_str, c_num, val]
+    all_tokens = [key_str, c_num, val]
     if key_str in _ORDINAL_TOKENS:
-        tokens_to_check.extend(_ORDINAL_TOKENS[key_str])
+        all_tokens.extend(_ORDINAL_TOKENS[key_str])
 
-    pattern_tokens = "|".join(re.escape(t) for t in set(tokens_to_check) if t)
+    if pos_idx_str:
+        all_tokens.append(pos_idx_str)
+        all_tokens.append(_CHINESE_NUMS.get(pos_idx_str, pos_idx_str))
+        if pos_idx_str in _ORDINAL_TOKENS:
+            all_tokens.extend(_ORDINAL_TOKENS[pos_idx_str])
+
+    # Build regex pattern for negation targeting any of these tokens
+    pattern_tokens = []
+    for t in set(all_tokens):
+        if not t:
+            continue
+        if t.isalpha() and len(t) == 1:
+            pattern_tokens.append(rf"(?:^|[^\w]){re.escape(t)}(?:[^\w]|$)")
+        else:
+            pattern_tokens.append(re.escape(t))
+
     negation_regex = re.compile(
-        rf"(?:不|别|不要|无需|排除|免去|取消|并非)\s*(?:想|要|选|用|采纳|考虑|以)?\s*(?:第)?(?:{pattern_tokens})",
+        rf"(?:不|别|不要|无需|排除|免去|取消|并非)\s*(?:想|要|选|用|采纳|考虑|以)?\s*(?:第)?(?:{'|'.join(pattern_tokens)})",
         flags=re.IGNORECASE
     )
     if negation_regex.search(msg):
         return False
 
-    # 2. Check if user verbatim mentioned the option value positively
-    if val in msg:
-        return True
-
-    # 3. Disambiguation: If user asks a question comparing multiple options, do not confirm
+    # 2. Disambiguation: If user asks a comparative or ambiguous question, do not confirm
     if any(q in msg for q in ("还是", "或者", "对比", "哪个好", "哪一个", "区别")):
         return False
+
+    # 3. Check if user verbatim mentioned the option value positively
+    if val in msg:
+        return True
 
     # 4. Strict key match:
     # Letters (A, B, C, D) must have word boundaries or affirmative prefix/suffix
@@ -106,22 +130,56 @@ def _is_option_selected(user_msg: str, key: str, val: str, all_options: dict[str
             if ord_token in msg:
                 return True
 
-    # Position-based ordinal
-    try:
-        keys_list = list(all_options.keys())
-        if key in keys_list:
-            idx_str = str(keys_list.index(key) + 1)
-            pos_ordinals = _ORDINAL_TOKENS.get(idx_str, [])
-            for ord_token in pos_ordinals:
-                if ord_token.isalpha() and len(ord_token) == 1:
-                    if re.search(rf"(?i)(?:^|[\s,，。；;、选按用])\s*{re.escape(ord_token)}\s*(?:$|[\s,，。；;、项个种])", msg):
-                        return True
-                elif ord_token in msg:
+    # Position-based ordinal matching
+    if pos_idx_str:
+        pos_ordinals = _ORDINAL_TOKENS.get(pos_idx_str, [])
+        for ord_token in pos_ordinals:
+            if ord_token.isalpha() and len(ord_token) == 1:
+                if re.search(rf"(?i)(?:^|[\s,，。；;、选按用])\s*{re.escape(ord_token)}\s*(?:$|[\s,，。；;、项个种])", msg):
                     return True
-    except Exception:
-        pass
+            elif ord_token in msg:
+                return True
 
     return False
+
+
+def _is_requirement_affirmed(user_msg: str, val: str, pending_options: dict[str, str]) -> bool:
+    """Verify that a requirement update value is affirmatively confirmed by the user.
+
+    Ensures that values mentioned in negative contexts ('别用轻松幽默') or ambiguous
+    comparison questions ('商务正式还是轻松幽默哪个好') are strictly rejected.
+    """
+    if not user_msg or not val:
+        return False
+    msg = user_msg.strip()
+
+    # 1. Reject ambiguous comparison questions
+    if any(q in msg for q in ("还是", "或者", "对比", "哪个好", "哪一个", "区别")):
+        return False
+
+    # 2. Check if val matches a pending option
+    matched_opt_key = None
+    for opt_key, opt_val in pending_options.items():
+        if opt_val == val:
+            matched_opt_key = opt_key
+            break
+
+    if matched_opt_key is not None:
+        return _is_option_selected(msg, matched_opt_key, val, pending_options)
+
+    # 3. For custom user requirement not originating from pending_options:
+    # Must be a verbatim substring in user_msg, but MUST NOT be negated
+    if val not in msg:
+        return False
+
+    negation_regex = re.compile(
+        rf"(?:不|别|不要|无需|排除|免去|取消|并非)\s*(?:想|要|选|用|采纳|考虑|以)?\s*{re.escape(val)}",
+        flags=re.IGNORECASE
+    )
+    if negation_regex.search(msg):
+        return False
+
+    return True
 
 
 def _validate_generated(content: Content, outline: Outline, target_kind: str) -> None:
@@ -250,22 +308,10 @@ Never infer a confirmed requirement out of nowhere.
     except Exception as exc:
         raise ServiceError("MODEL_OUTPUT_INVALID", 502) from exc
     kind = decision.target_kind
-    valid_updates = {}
-    for k, v in decision.requirement_updates.items():
-        if k not in FIELDS or not v.strip() or len(v) > 2000:
-            continue
-        # Direct verbatim mention by the user in current message
-        if v in request.message:
-            valid_updates[k] = v
-            continue
-        # Explicit user selection from pending options
-        matched_option = False
-        for opt_key, opt_val in memory.pending_options.items():
-            if opt_val == v and _is_option_selected(request.message, opt_key, opt_val, memory.pending_options):
-                matched_option = True
-                break
-        if matched_option:
-            valid_updates[k] = v
+    valid_updates = {
+        k: v for k, v in decision.requirement_updates.items()
+        if k in FIELDS and v.strip() and len(v) <= 2000 and _is_requirement_affirmed(request.message, v, memory.pending_options)
+    }
     memory.requirements.update(valid_updates)
     if request.requested_output != "auto" and kind != _OUTPUT_KIND[request.requested_output]:
         raise ServiceError("OUTPUT_INTENT_MISMATCH", 422)

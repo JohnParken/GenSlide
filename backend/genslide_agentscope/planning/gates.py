@@ -100,13 +100,24 @@ class CompletionRubricGate:
         if ledger is None or not ledger.is_all_completed():
             return GateDecision(should_stop=False)
 
-        # If any step in history is already a final_reply, stop immediately
-        has_final_reply = any(step.get("action") == "final_reply" for step in history)
-        if has_final_reply:
+        # Stop immediately only if a VALID user-facing final reply with non-empty content was delivered
+        def _is_valid_final_reply_step(step: dict[str, Any]) -> bool:
+            if step.get("action") != "final_reply":
+                return False
+            params = step.get("action_input")
+            if params is None:
+                params = step.get("parameters")
+            if isinstance(params, dict):
+                reply_text = params.get("reply")
+                return bool(reply_text and str(reply_text).strip())
+            return False
+
+        has_valid_final_reply = any(_is_valid_final_reply_step(step) for step in history)
+        if has_valid_final_reply:
             return GateDecision(
                 should_stop=True,
                 status="completed",
-                reason="All milestone tasks in the goal ledger are marked as completed and final reply provided",
+                reason="All milestone tasks in the goal ledger are marked as completed and valid final reply provided",
             )
 
         # If allow_summary_turn is True, check when the last task was completed
@@ -121,6 +132,10 @@ class CompletionRubricGate:
 
             if steps_after_completion == 0:
                 # Give the agent one opportunity to deliver the final reply
+                return GateDecision(should_stop=False)
+
+            # Allow 1 recovery turn if the agent attempted final_reply but needs to fix missing reply content
+            if steps_after_completion == 1 and history and history[-1].get("action") == "final_reply":
                 return GateDecision(should_stop=False)
 
         return GateDecision(

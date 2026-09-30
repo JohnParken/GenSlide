@@ -106,6 +106,51 @@ def test_option_selection_negative_and_word_boundary_guards():
     assert _is_option_selected("用轻松幽默", "2", "轻松幽默", options)
     assert _is_option_selected("选A", "1", "商务正式", {"A": "商务正式", "B": "轻松幽默"})
 
+    # 5. Position-based negative check on letter-keyed options:
+    # "不要选第二个" on {"A": ..., "B": ...} must be rejected for B
+    letter_options = {"A": "商务正式", "B": "轻松幽默"}
+    assert not _is_option_selected("不要选第二个", "B", "轻松幽默", letter_options)
+    assert not _is_option_selected("排除第2项", "B", "轻松幽默", letter_options)
+    assert _is_option_selected("选第二个", "B", "轻松幽默", letter_options)
+
+
+@pytest.mark.asyncio
+async def test_end_to_end_negation_and_comparison_questions_rejected(tmp_path):
+    """Verify that directly mentioning candidate values in negative or comparison contexts never updates requirements."""
+    skills = writing_skills(tmp_path)
+    mem = Memory(
+        last_reply="请选择风格：A. 商务正式 B. 轻松幽默",
+        pending_options={"A": "商务正式", "B": "轻松幽默"},
+    )
+
+    # 1. Negative intent directly mentioning candidate: "别用轻松幽默"
+    model1 = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing",
+         "requirement_updates": {"style": "轻松幽默"}},
+        {"effect": "reply", "reply": "好的，不使用轻松幽默。"},
+    )
+    res1 = await execute(req(message="别用轻松幽默"), mem, "", model1, skills)
+    assert "style" not in res1.memory.requirements
+
+    # 2. Comparison question: "商务正式还是轻松幽默哪个好"
+    model2 = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing",
+         "requirement_updates": {"style": "轻松幽默"}},
+        {"effect": "reply", "reply": "这两个风格各有千秋..."},
+    )
+    res2 = await execute(req(message="商务正式还是轻松幽默哪个好"), mem, "", model2, skills)
+    assert "style" not in res2.memory.requirements
+
+    # 3. Position-based negation on letter options: "不要选第二个"
+    model3 = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing",
+         "requirement_updates": {"style": "轻松幽默"}},
+        {"effect": "reply", "reply": "好的，排除第二个选项。"},
+    )
+    res3 = await execute(req(message="不要选第二个"), mem, "", model3, skills)
+    assert "style" not in res3.memory.requirements
+
+
 
 @pytest.mark.asyncio
 async def test_compose_payload_includes_last_reply_for_conversational_continuity(tmp_path):
