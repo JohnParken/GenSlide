@@ -138,6 +138,12 @@ class CompletionRubricGate:
             if steps_after_completion == 1 and history and history[-1].get("action") == "final_reply":
                 return GateDecision(should_stop=False)
 
+            return GateDecision(
+                should_stop=True,
+                status="failed",
+                reason="All milestone tasks in the goal ledger are marked as completed, but agent failed to produce a valid final user reply",
+            )
+
         return GateDecision(
             should_stop=True,
             status="completed",

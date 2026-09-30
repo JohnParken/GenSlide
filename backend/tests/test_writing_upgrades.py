@@ -113,6 +113,13 @@ def test_option_selection_negative_and_word_boundary_guards():
     assert not _is_option_selected("排除第2项", "B", "轻松幽默", letter_options)
     assert _is_option_selected("选第二个", "B", "轻松幽默", letter_options)
 
+    # 6. Letter option negation boundary tests:
+    # "不要选B", "别选B项", "不要B" must be rejected for B
+    assert not _is_option_selected("不要选B", "B", "轻松幽默", letter_options)
+    assert not _is_option_selected("别选B项", "B", "轻松幽默", letter_options)
+    assert not _is_option_selected("不要B", "B", "轻松幽默", letter_options)
+    assert _is_option_selected("选B", "B", "轻松幽默", letter_options)
+
 
 @pytest.mark.asyncio
 async def test_end_to_end_negation_and_comparison_questions_rejected(tmp_path):
@@ -149,6 +156,44 @@ async def test_end_to_end_negation_and_comparison_questions_rejected(tmp_path):
     )
     res3 = await execute(req(message="不要选第二个"), mem, "", model3, skills)
     assert "style" not in res3.memory.requirements
+
+    # 4. Direct letter negation: "不要选B"
+    model4 = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing",
+         "requirement_updates": {"style": "轻松幽默"}},
+        {"effect": "reply", "reply": "好的，排除B选项。"},
+    )
+    res4 = await execute(req(message="不要选B"), mem, "", model4, skills)
+    assert "style" not in res4.memory.requirements
+
+
+@pytest.mark.asyncio
+async def test_explicit_directive_and_topic_comparison_accepted(tmp_path):
+    """Verify that affirmative directives ('还是用轻松幽默吧') and legitimate comparison topics are accepted."""
+    skills = writing_skills(tmp_path)
+    mem = Memory(
+        last_reply="请选择风格：A. 商务正式 B. 轻松幽默",
+        pending_options={"A": "商务正式", "B": "轻松幽默"},
+    )
+
+    # 1. Legit topic discussing comparisons: "写一篇人工智能与传统算法的对比"
+    model1 = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing",
+         "requirement_updates": {"topic": "人工智能与传统算法的对比"}},
+        {"effect": "reply", "reply": "好的，已记录主题。"},
+    )
+    res1 = await execute(req(message="写一篇人工智能与传统算法的对比"), mem, "", model1, skills)
+    assert res1.memory.requirements.get("topic") == "人工智能与传统算法的对比"
+
+    # 2. Affirmative choice directive: "还是用轻松幽默吧"
+    model2 = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing",
+         "requirement_updates": {"style": "轻松幽默"}},
+        {"effect": "reply", "reply": "好的，采用轻松幽默风格。"},
+    )
+    res2 = await execute(req(message="还是用轻松幽默吧"), mem, "", model2, skills)
+    assert res2.memory.requirements.get("style") == "轻松幽默"
+
 
 
 

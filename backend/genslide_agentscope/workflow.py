@@ -57,6 +57,53 @@ _ORDINAL_TOKENS = {
 _CHINESE_NUMS = {"1": "一", "2": "二", "3": "三", "4": "四"}
 
 
+PREFIX_BOUND = r"(?:^|[\s,，。；;、选按用要考虑第])"
+SUFFIX_BOUND = r"(?:$|[\s,，。；;、项个种吧啦]|[^\w])"
+
+
+def _is_ambiguous_comparison_question(msg: str) -> bool:
+    """Detect whether user input is an ambiguous comparative inquiry rather than an affirmative directive.
+
+    Explicit decisions ('还是用轻松幽默吧', '还是选A') and legitimate content topics
+    ('写一篇人工智能与传统算法的对比') are strictly exempt from being rejected.
+    """
+    if not msg:
+        return False
+    text = msg.strip()
+
+    # 1. Exempt affirmative directives and final choice phrasing
+    if re.search(r"(?:还是|就|按|请|决定)\s*(?:用|选|按|采用|以|决定)", text):
+        return False
+    if re.search(r"(?:吧|即可|就行|好了)$", text):
+        return False
+
+    # Exempt document/article topic requests discussing comparisons
+    if re.search(r"(?:写|作|撰写|分析|生成|输出|制作|关于).*(?:对比|比较)", text):
+        return False
+    if re.search(r"(?:对比|比较).*(?:分析|研究|报告|文章|总结)", text):
+        return False
+
+    # 2. Genuine comparative inquiry phrases
+    inquiry_phrases = (
+        "哪个好", "哪一个好", "哪个适合", "哪种更好", "怎么选",
+        "有什么区别", "有什么不同", "区别在哪", "对比一下", "哪个更"
+    )
+    if any(p in text for p in inquiry_phrases):
+        return True
+
+    # Comparative questions with alternatives followed by preference evaluation
+    if re.search(r"(?:还是|或者).*(?:好|更好|适合|优)", text):
+        return True
+
+    # 3. Questions containing alternative options with question particles
+    is_question = any(q in text for q in ("？", "?", "吗", "呢", "如何"))
+    has_alternative = any(a in text for a in ("还是", "或者"))
+    if is_question and has_alternative:
+        return True
+
+    return False
+
+
 def _is_option_selected(user_msg: str, key: str, val: str, all_options: dict[str, str]) -> bool:
     """Verify that the user's natural language input affirmatively and unambiguously selected this option."""
     if not user_msg or not val:
@@ -85,25 +132,31 @@ def _is_option_selected(user_msg: str, key: str, val: str, all_options: dict[str
         if pos_idx_str in _ORDINAL_TOKENS:
             all_tokens.extend(_ORDINAL_TOKENS[pos_idx_str])
 
-    # Build regex pattern for negation targeting any of these tokens
-    pattern_tokens = []
+    # Build regex patterns for negation targeting any of these tokens
+    negation_patterns = []
+    non_letter_tokens = []
     for t in set(all_tokens):
         if not t:
             continue
         if t.isalpha() and len(t) == 1:
-            pattern_tokens.append(rf"(?:^|[^\w]){re.escape(t)}(?:[^\w]|$)")
+            negation_patterns.append(
+                rf"(?:不|别|不要|无需|排除|免去|取消|并非)\s*(?:想|要|选|用|采纳|考虑|以)?\s*(?:第)?\s*{re.escape(t)}{SUFFIX_BOUND}"
+            )
         else:
-            pattern_tokens.append(re.escape(t))
+            non_letter_tokens.append(re.escape(t))
 
-    negation_regex = re.compile(
-        rf"(?:不|别|不要|无需|排除|免去|取消|并非)\s*(?:想|要|选|用|采纳|考虑|以)?\s*(?:第)?(?:{'|'.join(pattern_tokens)})",
-        flags=re.IGNORECASE
-    )
-    if negation_regex.search(msg):
-        return False
+    if non_letter_tokens:
+        sub_pat = "|".join(non_letter_tokens)
+        negation_patterns.append(
+            rf"(?:不|别|不要|无需|排除|免去|取消|并非)\s*(?:想|要|选|用|采纳|考虑|以)?\s*(?:第)?(?:{sub_pat})"
+        )
 
-    # 2. Disambiguation: If user asks a comparative or ambiguous question, do not confirm
-    if any(q in msg for q in ("还是", "或者", "对比", "哪个好", "哪一个", "区别")):
+    for pat in negation_patterns:
+        if re.search(pat, msg, flags=re.IGNORECASE):
+            return False
+
+    # 2. Disambiguation: Check genuine comparative inquiry
+    if _is_ambiguous_comparison_question(msg):
         return False
 
     # 3. Check if user verbatim mentioned the option value positively
@@ -113,18 +166,14 @@ def _is_option_selected(user_msg: str, key: str, val: str, all_options: dict[str
     # 4. Strict key match:
     # Letters (A, B, C, D) must have word boundaries or affirmative prefix/suffix
     if key_str.isalpha() and len(key_str) == 1:
-        letter_match = re.search(
-            rf"(?i)(?:^|[\s,，。；;、选按用])\s*{re.escape(key_str)}\s*(?:$|[\s,，。；;、项个种])",
-            msg
-        )
-        if letter_match:
+        if re.search(rf"(?i){PREFIX_BOUND}\s*{re.escape(key_str)}\s*{SUFFIX_BOUND}", msg):
             return True
 
     # Digits (1, 2, 3, 4) or Ordinals
     ordinals = _ORDINAL_TOKENS.get(key_str, [])
     for ord_token in ordinals:
         if ord_token.isalpha() and len(ord_token) == 1:
-            if re.search(rf"(?i)(?:^|[\s,，。；;、选按用])\s*{re.escape(ord_token)}\s*(?:$|[\s,，。；;、项个种])", msg):
+            if re.search(rf"(?i){PREFIX_BOUND}\s*{re.escape(ord_token)}\s*{SUFFIX_BOUND}", msg):
                 return True
         else:
             if ord_token in msg:
@@ -135,7 +184,7 @@ def _is_option_selected(user_msg: str, key: str, val: str, all_options: dict[str
         pos_ordinals = _ORDINAL_TOKENS.get(pos_idx_str, [])
         for ord_token in pos_ordinals:
             if ord_token.isalpha() and len(ord_token) == 1:
-                if re.search(rf"(?i)(?:^|[\s,，。；;、选按用])\s*{re.escape(ord_token)}\s*(?:$|[\s,，。；;、项个种])", msg):
+                if re.search(rf"(?i){PREFIX_BOUND}\s*{re.escape(ord_token)}\s*{SUFFIX_BOUND}", msg):
                     return True
             elif ord_token in msg:
                 return True
@@ -147,14 +196,15 @@ def _is_requirement_affirmed(user_msg: str, val: str, pending_options: dict[str,
     """Verify that a requirement update value is affirmatively confirmed by the user.
 
     Ensures that values mentioned in negative contexts ('别用轻松幽默') or ambiguous
-    comparison questions ('商务正式还是轻松幽默哪个好') are strictly rejected.
+    comparison questions ('商务正式还是轻松幽默哪个好') are strictly rejected,
+    while legitimate directives ('还是用轻松幽默吧') and topics ('...对比') are accepted.
     """
     if not user_msg or not val:
         return False
     msg = user_msg.strip()
 
     # 1. Reject ambiguous comparison questions
-    if any(q in msg for q in ("还是", "或者", "对比", "哪个好", "哪一个", "区别")):
+    if _is_ambiguous_comparison_question(msg):
         return False
 
     # 2. Check if val matches a pending option

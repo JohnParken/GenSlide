@@ -306,4 +306,41 @@ async def test_react_agent_with_ledger_does_not_prematurely_stop_on_invalid_fina
     assert res.iterations == 2
 
 
+@pytest.mark.asyncio
+async def test_react_agent_with_ledger_fails_when_recovery_turns_exhausted():
+    """Verify that when tasks in ledger are completed but agent fails recovery, status is 'failed' not 'completed'."""
+    ledger = GoalLedger(goal="Ledger completion failure test")
+    t = ledger.add_task("Subtask A")
+    ledger.complete_task(t.task_id)
+
+    model = MockModel([
+        # Turn 1: invalid final_reply without reply parameter
+        {
+            "thought": "All tasks done, closing",
+            "action": "final_reply",
+            "action_input": {},
+        },
+        # Turn 2: still invalid final_reply without reply parameter
+        {
+            "thought": "Still failing to deliver reply",
+            "action": "final_reply",
+            "action_input": {},
+        },
+        # Turn 3: should NOT be called because recovery turn budget is exhausted!
+        {
+            "thought": "Never reached",
+            "action": "final_reply",
+            "action_input": {"reply": "不会被执行"},
+        },
+    ])
+    agent = ReActAgent(model=model)
+    res = await agent.execute_turn(HookContext(), ledger=ledger)
+
+    # Must be marked failed, not completed!
+    assert res.status == "failed"
+    assert res.final_reply == ""
+    assert res.iterations == 2
+
+
+
 
