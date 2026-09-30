@@ -142,7 +142,7 @@ def create_app(
         # Import the framework-specific engine only for the default production path.
         from .engine import Engine as DefaultEngine
 
-        engine = DefaultEngine()
+        engine = DefaultEngine(settings=settings)
     if bff is None:
         bff = BFFClient(settings)
     runtime = ExecutionRuntime(bff, engine, settings)

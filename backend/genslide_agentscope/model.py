@@ -69,9 +69,26 @@ class Model:
     #: Model input budget for one request payload; workflow uses it to size materials.
     max_input_bytes = MAX_INPUT_BYTES
 
-    def __init__(self):
-        base, key, name = model_settings()
-        self.provider_name = model_provider_from_env()
+    def __init__(self, base_url: str | None = None, api_key: str | None = None,
+                 model_name: str | None = None, provider: str | None = None,
+                 settings=None):
+        if settings is not None:
+            base = getattr(settings, "model_base_url", None) or ""
+            key = getattr(settings, "model_api_key", None) or ""
+            name = getattr(settings, "model_name", None) or ""
+            self.provider_name = getattr(settings, "model_provider", None) or model_provider_from_env()
+        else:
+            base = base_url or ""
+            key = api_key or ""
+            name = model_name or ""
+            self.provider_name = provider or model_provider_from_env()
+
+        if not (base and key and name):
+            env_base, env_key, env_name = model_settings()
+            base = base or env_base
+            key = key or env_key
+            name = name or env_name
+
         self.tl_provider = None
         if self.provider_name == "tl":
             self.tl_provider = TLProvider(base, key, name)

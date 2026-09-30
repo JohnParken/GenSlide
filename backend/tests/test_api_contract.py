@@ -70,3 +70,20 @@ async def test_authenticated_api_sse_and_redacted_validation(monkeypatch, tmp_pa
                 assert metrics.status_code == 200
                 assert "genslide_sessions_cached 1" in metrics.text
                 assert "genslide_generation_active 0" in metrics.text
+
+
+def test_create_app_with_explicit_settings_without_environment_variables(monkeypatch):
+    monkeypatch.delenv("MODEL_BASE_URL", raising=False)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    monkeypatch.delenv("MODEL_NAME", raising=False)
+
+    settings = Settings(
+        bff_url="http://127.0.0.1:8000",
+        service_token=TOKEN,
+        model_base_url="https://api.test/v1",
+        model_api_key="sk-test-key-12345",
+        model_name="custom-gpt-4o",
+    )
+    app = create_app(settings=settings)
+    assert app.state.runtime.engine.model.sdk_model.model == "custom-gpt-4o"
+

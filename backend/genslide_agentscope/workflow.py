@@ -344,6 +344,69 @@ def _skill_result(skill: dict, kind: str) -> dict:
 
 
 
+MAX_CATALOG_PAYLOAD_BYTES = 20000
+MAX_SKILL_DESC_CHARS = 120
+
+
+def prune_catalog_for_decision(
+    catalog: list[dict],
+    requested_skill_id: str | None,
+    current_skill_id: str | None,
+    requested_output: str | None,
+) -> list[dict]:
+    """Prune and compact the skill catalog so it fits safely within model input budgets.
+
+    - Truncates descriptions to compact summaries (decision phase only needs high-level routing).
+    - Prioritizes requested_skill_id and current_skill_id.
+    - Prioritizes skills matching requested_output if specified.
+    - Enforces a strict byte budget (MAX_CATALOG_PAYLOAD_BYTES) to guarantee total payload < 60KB.
+    """
+    if not catalog:
+        return []
+
+    top_priority = []
+    output_matched = []
+    others = []
+
+    req_kind = _OUTPUT_KIND.get(requested_output) if requested_output and requested_output != "auto" else None
+
+    for item in catalog:
+        s_id = item.get("skill_id")
+        if s_id and (s_id == requested_skill_id or s_id == current_skill_id):
+            top_priority.append(item)
+        elif req_kind and req_kind in item.get("supported_outputs", []):
+            output_matched.append(item)
+        else:
+            others.append(item)
+
+    output_matched.sort(key=lambda s: (-s.get("priority", 0), s.get("skill_id", "")))
+    others.sort(key=lambda s: (-s.get("priority", 0), s.get("skill_id", "")))
+
+    ordered_candidates = top_priority + output_matched + others
+
+    pruned = []
+    current_bytes = 0
+    for s in ordered_candidates:
+        desc = s.get("description", "")
+        if len(desc) > MAX_SKILL_DESC_CHARS:
+            desc = desc[:MAX_SKILL_DESC_CHARS] + "..."
+        entry = {
+            "skill_id": s["skill_id"],
+            "name": s.get("name", s["skill_id"]),
+            "description": desc,
+            "supported_outputs": s.get("supported_outputs", []),
+            "default_output": s.get("default_output", ""),
+            "priority": s.get("priority", 0),
+        }
+        entry_bytes = len(json.dumps(entry, ensure_ascii=False).encode())
+        if current_bytes + entry_bytes > MAX_CATALOG_PAYLOAD_BYTES and pruned:
+            break
+        pruned.append(entry)
+        current_bytes += entry_bytes
+
+    return pruned
+
+
 async def execute(request: ExecuteRequest, memory: Memory, materials: str, model,
                   skills: SkillRegistry, progress=None) -> WorkResult:
     memory = memory.model_copy(deep=True)
@@ -354,6 +417,9 @@ async def execute(request: ExecuteRequest, memory: Memory, materials: str, model
     catalog = registry.list_skills()
     if request.requested_skill_id and request.requested_skill_id not in registry.skills:
         raise ServiceError("SKILL_NOT_FOUND", 422)
+    decision_catalog = prune_catalog_for_decision(
+        catalog, request.requested_skill_id, memory.skill_id, request.requested_output
+    )
     summary = {
         "requirements": memory.requirements,
         "target_kind": memory.target_kind,
@@ -377,7 +443,7 @@ previously offered to the user if they confirmed or selected it (e.g. '第二种
 Never infer a confirmed requirement out of nowhere.
 """, {"phase": "decide", "message": request.message, "context": summary,
       "requested_output": request.requested_output, "requested_skill_id": request.requested_skill_id,
-      "skills": catalog, "has_materials": bool(materials), "schema": TurnDecision.model_json_schema()})
+      "skills": decision_catalog, "has_materials": bool(materials), "schema": TurnDecision.model_json_schema()})
     try:
         decision = TurnDecision.model_validate(decision_raw)
     except Exception as exc:

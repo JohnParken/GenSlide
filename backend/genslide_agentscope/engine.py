@@ -8,8 +8,11 @@ from .workflow import execute
 class Engine:
     name = "agentscope"
 
-    def __init__(self, model=None):
-        self.model = model if model is not None else Model()
+    def __init__(self, model=None, settings=None):
+        if model is not None:
+            self.model = model
+        else:
+            self.model = Model(settings=settings)
         self.skills = SkillRegistry()
         self.committed = {}
         self.turn_counts = {}

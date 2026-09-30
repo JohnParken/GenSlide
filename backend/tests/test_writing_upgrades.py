@@ -278,6 +278,48 @@ async def test_polite_task_request_and_directive_are_accepted(tmp_path):
     assert res2.memory.requirements.get("style") == "轻松幽默"
 
 
+@pytest.mark.asyncio
+async def test_large_skill_catalog_pruned_under_model_context_budget(tmp_path):
+    """Verify that a large skill catalog with detailed descriptions does not crash with 413 MODEL_CONTEXT_TOO_LARGE."""
+    from genslide_agentscope.skills import SkillRegistry
+    from genslide_agentscope.model import encode_payload
+
+    class StrictBudgetModel:
+        def __init__(self):
+            self.step = 0
+            self.pruned_catalog_len = 0
+        async def complete(self, prompt, payload):
+            # Must strictly validate payload encoding limits
+            encode_payload(payload)
+            self.step += 1
+            if self.step == 1:
+                self.pruned_catalog_len = len(payload.get("skills", []))
+                return {"effect": "reply", "target_kind": "writing", "skill_id": "skill_0"}
+            return {"effect": "reply", "reply": "已为您成功选择技能。"}
+
+    reg = SkillRegistry.__new__(SkillRegistry)
+    reg.skills = {}
+    for i in range(24):
+        reg.skills[f"skill_{i}"] = {
+            "skill_id": f"skill_{i}",
+            "name": f"Skill {i}",
+            "description": "这是详细的专业写作领域技能描述说明。" * 60,  # ~1200 chars per skill
+            "kind": "writing",
+            "supported_outputs": ["text"],
+            "default_output": "text",
+            "priority": 100 - i,
+            "content": "技能提示词正文",
+            "version": "1.0",
+            "hash": f"hash_{i}"
+        }
+
+    model = StrictBudgetModel()
+    res = await execute(req(message="你好"), Memory(), "", model, reg)
+    assert res.memory.skill_id == "skill_0"
+    assert model.pruned_catalog_len > 0
+
+
+
 
 
 

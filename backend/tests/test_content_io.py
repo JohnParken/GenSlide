@@ -168,3 +168,20 @@ def test_parse_docx_preserves_paragraph_table_order_and_cells(tmp_path: Path) ->
     document.add_paragraph("After")
     document.save(source)
     assert parse_attachment(source) == "Before\n\nLeft | Right\n\nAfter"
+
+
+def test_render_document_with_invalid_xml_control_characters_succeeds(tmp_path: Path) -> None:
+    from docx import Document
+
+    content = {
+        "title": "测试\u0000文档\u0001标题",
+        "sections": [
+            {"title": "第一节\u0002", "body": "前文\u0001\u0003后文", "notes": "说明\u0004"}
+        ]
+    }
+    rendered_path = render_content("document", content, tmp_path)
+    assert rendered_path.exists()
+    doc = Document(str(rendered_path))
+    texts = [p.text for p in doc.paragraphs if p.text]
+    assert texts == ["测试文档标题", "第一节", "前文后文"]
+

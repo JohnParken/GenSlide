@@ -201,12 +201,27 @@ def parse_attachment(path: Path, *, max_input_bytes: int = MAX_INPUT_BYTES,
     return normalized
 
 
+_INVALID_XML_CHARS = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f]"
+)
+
+
+def sanitize_xml_text(text: str) -> str:
+    """Strip characters that violate W3C XML 1.0 specifications and cause docx/pptx crashes."""
+    if not isinstance(text, str):
+        return text
+    return _INVALID_XML_CHARS.sub("", text)
+
+
 def _validated_content(content: dict) -> tuple[str, list[dict]]:
     if not isinstance(content, dict):
         raise TypeError("content must be a dictionary")
-    title = content.get("title")
+    raw_title = content.get("title")
     sections = content.get("sections")
-    if not isinstance(title, str) or not title.strip():
+    if not isinstance(raw_title, str) or not raw_title.strip():
+        raise ValueError("content.title must be a non-empty string")
+    title = sanitize_xml_text(raw_title).strip()
+    if not title:
         raise ValueError("content.title must be a non-empty string")
     if not isinstance(sections, list):
         raise ValueError("content.sections must be a list")
@@ -219,19 +234,28 @@ def _validated_content(content: dict) -> tuple[str, list[dict]]:
     for index, section in enumerate(sections):
         if not isinstance(section, dict):
             raise ValueError(f"section {index} must be a dictionary")
-        heading, body = section.get("title"), section.get("body")
-        notes = section.get("notes", "")
-        if not isinstance(heading, str) or not heading.strip():
+        raw_heading, raw_body = section.get("title"), section.get("body")
+        raw_notes = section.get("notes", "")
+        if not isinstance(raw_heading, str) or not raw_heading.strip():
             raise ValueError(f"section {index} title must be a non-empty string")
-        if not isinstance(body, str) or not body.strip():
+        if not isinstance(raw_body, str) or not raw_body.strip():
             raise ValueError(f"section {index} body must be a non-empty string")
-        if not isinstance(notes, str):
+        if not isinstance(raw_notes, str):
             raise ValueError(f"section {index} notes must be a string")
+
+        heading = sanitize_xml_text(raw_heading).strip()
+        body = sanitize_xml_text(raw_body).strip()
+        notes = sanitize_xml_text(raw_notes).strip()
+        if not heading:
+            raise ValueError(f"section {index} title must be a non-empty string")
+        if not body:
+            raise ValueError(f"section {index} body must be a non-empty string")
+
         total_chars += len(heading) + len(body) + len(notes)
-        normalized_sections.append({"title": heading.strip(), "body": body.strip(), "notes": notes.strip()})
+        normalized_sections.append({"title": heading, "body": body, "notes": notes})
     if total_chars > MAX_OUTPUT_CHARS:
         raise ValueError(f"content exceeds the {MAX_OUTPUT_CHARS}-character limit")
-    return title.strip(), normalized_sections
+    return title, normalized_sections
 
 
 def render_content(kind: str, content: dict, directory: Path) -> Path:
