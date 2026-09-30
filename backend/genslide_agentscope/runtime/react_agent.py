@@ -141,7 +141,17 @@ class ReActAgent:
             action = step.action.strip().lower()
 
             if action == "final_reply":
-                final_reply = str(step.action_input.get("reply", step.thought))
+                reply_val = step.action_input.get("reply")
+                if not reply_val or not str(reply_val).strip():
+                    step.observation = (
+                        "Error: 'final_reply' requires a non-empty 'reply' parameter in action_input. "
+                        "Do not leak internal thoughts; provide the explicit user-facing response."
+                    )
+                    step_history.append(step.model_dump())
+                    iteration += 1
+                    continue
+
+                final_reply = str(reply_val).strip()
                 step.observation = "Completed final reply."
                 step_history.append(step.model_dump())
                 iteration += 1

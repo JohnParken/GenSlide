@@ -81,11 +81,13 @@ class ChatClient:
         state.artifacts = result.get("files", [])
         return result
 
-    def reconcile(self, pending: dict[str, Any], *, state: ChatState) -> dict[str, Any] | None:
+    def reconcile(self, pending: dict[str, Any], *, state: ChatState) -> dict[str, Any]:
         """Reconcile an unconfirmed action with BFF to avoid state drift or version conflict.
 
-        If already committed on BFF, synchronizes session_version, recovers result, and returns it.
-        If still pending/closed, synchronizes latest session_version and allows safe clearing.
+        Returns a dictionary with structured outcome:
+        - "outcome": "committed" | "closed" | "active" | "network_error"
+        - "result": recovered result dict (if committed)
+        - "message": descriptive status message
         """
         request = {
             "api_contract_version": "1", "engine": state.engine,
@@ -101,7 +103,8 @@ class ChatClient:
         }
         try:
             begun = self._request(self.bff_url, "dev/begin", payload=request)
-            if begun.get("status") == "committed":
+            begun_status = begun.get("status")
+            if begun_status == "committed":
                 stored = begun["result"]
                 result = {
                     "status": "completed", "action_id": pending["action_id"],
@@ -117,12 +120,26 @@ class ChatClient:
                 if result.get("content") is not None:
                     state.content = result["content"]
                 state.artifacts = result.get("files", [])
-                return result
-            if "session_version" in begun:
-                state.session_version = max(state.session_version, begun["session_version"])
-        except Exception:
-            pass
-        return None
+                return {"outcome": "committed", "result": result, "message": "已从服务端恢复上一次执行成果"}
+
+            if begun_status == "closed":
+                if "session_version" in begun:
+                    state.session_version = max(state.session_version, begun["session_version"])
+                return {"outcome": "closed", "message": f"操作已关闭 ({begun.get('settle_reason', 'closed')})"}
+
+            if begun_status in ("authorized", "active"):
+                if "session_version" in begun:
+                    state.session_version = max(state.session_version, begun["session_version"])
+                return {"outcome": "active", "message": "操作仍在服务端执行中"}
+
+            return {"outcome": "unknown", "message": f"状态未知 ({begun_status})"}
+
+        except ChatClientError as exc:
+            if exc.code == "ACTION_CLOSED" or exc.status == 409 and "closed" in str(exc).lower():
+                return {"outcome": "closed", "message": "操作已关闭"}
+            return {"outcome": "network_error", "message": f"对账请求失败: {exc}"}
+        except Exception as exc:
+            return {"outcome": "network_error", "message": f"网络对账异常: {exc}"}
 
     def _request(self, base: str, path: str, *, method="POST", payload=None, raw=None, headers=None):
         data = raw if raw is not None else (json.dumps(payload or {}).encode() if payload is not None else None)

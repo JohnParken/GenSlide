@@ -249,3 +249,31 @@ async def test_react_agent_respects_explicit_max_turns():
     assert res.iterations == 1
     assert res.status == "max_iterations_exceeded"
 
+
+@pytest.mark.asyncio
+async def test_react_agent_does_not_leak_internal_thought_on_empty_reply():
+    """Verify that empty reply in final_reply does not leak internal thought."""
+    model = MockModel([
+        # Turn 1: final_reply with empty action_input
+        {
+            "thought": "[SECRET_STRATEGY] Internal system reasoning",
+            "action": "final_reply",
+            "action_input": {},
+        },
+        # Turn 2: Model corrects itself and provides explicit reply
+        {
+            "thought": "Providing proper reply now",
+            "action": "final_reply",
+            "action_input": {"reply": "面向用户的正常答复"},
+        },
+    ])
+    agent = ReActAgent(model=model)
+    res = await agent.execute_turn(HookContext())
+
+    assert res.status == "completed"
+    assert res.final_reply == "面向用户的正常答复"
+    assert "[SECRET_STRATEGY]" not in res.final_reply
+    # Verify that turn 1 recorded error observation
+    assert "requires a non-empty 'reply'" in res.history[0]["observation"]
+
+

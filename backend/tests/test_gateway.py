@@ -184,3 +184,15 @@ def test_json_verbatim_fidelity_for_code_blocks_and_tags():
     assert decode_output(complex_wrap) == v2
 
 
+def test_think_tag_containing_json_braces_preserves_clean_payload():
+    """Verify that JSON braces occurring inside <think> tags do not destroy the subsequent payload."""
+    raw = '<think>I will output {"effect":"reply"}</think>\n{"effect":"reply","reply":"真实回复"}'
+    out = sanitize_model_output(raw)
+    assert out.clean_text == '{"effect":"reply","reply":"真实回复"}'
+    assert out.thought == 'I will output {"effect":"reply"}'
+
+    res = loads_repaired(raw)
+    assert res == {"effect": "reply", "reply": "真实回复"}
+
+
+

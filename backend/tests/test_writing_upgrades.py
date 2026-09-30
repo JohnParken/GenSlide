@@ -84,6 +84,47 @@ async def test_unselected_pending_option_is_not_adopted_when_user_switches_topic
     assert "style" not in result.memory.requirements
 
 
+def test_option_selection_negative_and_word_boundary_guards():
+    from genslide_agentscope.workflow import _is_option_selected
+
+    options = {"1": "商务正式", "2": "轻松幽默"}
+
+    # 1. Negative intent: "不要选第二个"
+    assert not _is_option_selected("不要选第二个", "2", "轻松幽默", options)
+    assert not _is_option_selected("别用轻松幽默", "2", "轻松幽默", options)
+    assert not _is_option_selected("排除第2项", "2", "轻松幽默", options)
+
+    # 2. English word boundary: "帮我分析API" contains letter 'A'
+    assert not _is_option_selected("帮我分析API", "1", "商务正式", options)
+    assert not _is_option_selected("探讨RESTful架构", "1", "商务正式", options)
+
+    # 3. Disambiguation: "第一个还是第二个好"
+    assert not _is_option_selected("第一个还是第二个好", "1", "商务正式", options)
+
+    # 4. Legitimate affirmative selection
+    assert _is_option_selected("选第二个", "2", "轻松幽默", options)
+    assert _is_option_selected("用轻松幽默", "2", "轻松幽默", options)
+    assert _is_option_selected("选A", "1", "商务正式", {"A": "商务正式", "B": "轻松幽默"})
+
+
+@pytest.mark.asyncio
+async def test_compose_payload_includes_last_reply_for_conversational_continuity(tmp_path):
+    skills = writing_skills(tmp_path)
+    mem = Memory(last_reply="上次回复：1. 性能优化 2. 内存治理 3. 架构重构")
+    model = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing"},
+        {"effect": "reply", "reply": "这是针对内存治理的展开说明。"},
+    )
+    result = await execute(req(message="展开你上次回复的第二点"), mem, "", model, skills)
+
+    # Verify compose payload in call 1 received last_reply
+    compose_payload = model.calls[1]
+    assert compose_payload.get("last_reply") == "上次回复：1. 性能优化 2. 内存治理 3. 架构重构"
+    assert result.result.get("reply") == "这是针对内存治理的展开说明。"
+
+
+
+
 
 @pytest.mark.asyncio
 async def test_large_content_local_edit_does_not_blow_context_budget(tmp_path):
@@ -195,5 +236,29 @@ async def test_dynamic_budget_allocation_with_8000_char_section_and_huge_materia
     # Verify mandatory user disclosure in assumptions
     assumptions = res.result.get("user_visible_assumptions", [])
     assert any("参考材料已按安全预算做有界截取" in a for a in assumptions)
+
+
+@pytest.mark.asyncio
+async def test_escaping_material_inflation_converges_under_budget(tmp_path):
+    from genslide_agentscope.model import encode_payload
+
+    skills = writing_skills(tmp_path)
+    mem = Memory()
+
+    # 30,000 characters of heavily escaped text (quotes, backslashes, newlines)
+    escaped_materials = '段落："引用内容"，路径：C:\\Program Files\\App。\n' * 1000
+
+    model = Model(
+        {"effect": "reply", "target_kind": "writing", "skill_id": "writing"},
+        {"effect": "reply", "reply": "已结合材料分析。"},
+    )
+
+    res = await execute(req(message="请分析该材料"), mem, escaped_materials, model, skills)
+    compose_payload = model.calls[1]
+
+    # Verify that the JSON-encoded payload strictly obeys the 60000 limit and does not trigger 413!
+    encoded = encode_payload(compose_payload)
+    assert len(encoded.encode("utf-8")) <= 58000
+
 
 

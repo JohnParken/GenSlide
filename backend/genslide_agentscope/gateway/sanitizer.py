@@ -20,35 +20,36 @@ class SanitizedOutput:
 def extract_thought(raw_text: str) -> tuple[str, str]:
     """Extract outer <think> tag if present before any JSON payload or in plain text responses.
 
-    Preserves <think> tags that reside inside valid JSON payloads.
+    Preserves <think> tags that reside inside valid JSON payloads,
+    and cleanly handles JSON braces '{' occurring inside thinking chains.
     """
     if not raw_text or "<think>" not in raw_text.lower():
         return raw_text, ""
+
+    lower_text = raw_text.lower()
+    think_start = lower_text.find("<think>")
 
     first_brace = raw_text.find("{")
     first_bracket = raw_text.find("[")
     json_candidates = [p for p in (first_brace, first_bracket) if p != -1]
     first_json = min(json_candidates) if json_candidates else -1
 
-    think_start = raw_text.lower().find("<think>")
+    # If a JSON structure clearly starts BEFORE the <think> tag,
+    # the <think> tag is internal to the payload; preserve verbatim.
     if first_json != -1 and think_start > first_json:
-        # <think> tag is inside the JSON structure; preserve verbatim
         return raw_text, ""
 
-    # Look for the FIRST <think>...</think> pair that precedes JSON
-    think_end = raw_text.lower().find("</think>", think_start)
-    if think_end != -1 and (first_json == -1 or think_end < first_json):
+    # think_start precedes any JSON payload. Identify outer <think> boundary.
+    think_end = lower_text.find("</think>", think_start)
+    if think_end != -1:
         thought = raw_text[think_start + 7 : think_end].strip()
         clean = (raw_text[:think_start] + raw_text[think_end + 8 :]).strip()
         return clean, thought
 
     # If unclosed <think> before JSON or in plain text
-    if first_json == -1 or think_start < first_json:
-        thought = raw_text[think_start + 7 :].strip()
-        clean = raw_text[:think_start].strip()
-        return clean, thought
-
-    return raw_text, ""
+    thought = raw_text[think_start + 7 :].strip()
+    clean = raw_text[:think_start].strip()
+    return clean, thought
 
 
 def strip_markdown_fences(text: str) -> str:

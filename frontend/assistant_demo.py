@@ -38,19 +38,26 @@ if pending:
     with col1:
         retry = st.button("重试原请求")
     with col2:
-        if st.button("放弃上次请求并重新输入"):
-            recovered = None
-            try:
-                recovered = client.reconcile(pending, state=state)
-            except Exception:
-                pass
-            if recovered:
+        if st.button("对账并尝试重置"):
+            outcome_info = client.reconcile(pending, state=state)
+            outcome = outcome_info.get("outcome")
+            if outcome == "committed":
+                recovered = outcome_info.get("result", {})
                 reply = recovered.get("reply") or recovered.get("result", {}).get("reply") or "本轮已完成。"
                 st.session_state.assistant_messages.extend([("user", pending["message"]), ("assistant", reply)])
                 for ref in recovered.get("files", []):
                     st.session_state.assistant_files[ref["file_id"]] = ref
-            st.session_state.assistant_pending = None
-            st.rerun()
+                st.session_state.assistant_pending = None
+                st.success("已成功从服务端恢复已完成的执行成果！")
+                st.rerun()
+            elif outcome == "closed":
+                st.warning(outcome_info.get("message", "操作已确认关闭，已安全重置。"))
+                st.session_state.assistant_pending = None
+                st.rerun()
+            elif outcome == "active":
+                st.info("操作仍在服务端执行中。为防版本冲突与丢失成果，已保留原请求，请点击“重试原请求”或稍后再次对账。")
+            else:
+                st.error(f"对账结果未知（{outcome_info.get('message')}）。已保留原请求，请检查网络后重试。")
 else:
     retry = False
 
