@@ -112,7 +112,10 @@ class CompletionRubricGate:
                 params = step.get("parameters")
             if isinstance(params, dict):
                 reply_text = params.get("reply")
-                return bool(reply_text and str(reply_text).strip())
+                if reply_text and str(reply_text).strip():
+                    return True
+                if params.get("deliverable") is not None or params.get("outline") is not None:
+                    return True
             return False
 
         has_valid_final_reply = any(_is_valid_final_reply_step(step) for step in history)

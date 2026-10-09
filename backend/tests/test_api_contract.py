@@ -16,11 +16,16 @@ class Model:
         self.calls = 0
     async def complete(self, system, payload):
         self.calls += 1
-        if payload.get("phase") == "decide":
-            return {"effect": "reply",
-                    "target_kind": "writing", "skill_id": "writing"}
-        return {"effect": "reply", "reply": "What audience should this guide serve?",
-                "target_kind": "writing", "skill_id": "writing"}
+        return {
+            "thought": "Ask user about audience using ReAct final_reply.",
+            "action": "final_reply",
+            "action_input": {
+                "effect": "reply",
+                "reply": "What audience should this guide serve?",
+                "target_kind": "writing",
+                "skill_id": "writing",
+            },
+        }
 
 @pytest.mark.asyncio
 async def test_authenticated_api_sse_and_redacted_validation(monkeypatch, tmp_path):
@@ -59,12 +64,12 @@ async def test_authenticated_api_sse_and_redacted_validation(monkeypatch, tmp_pa
                 assert "event: accepted" in response.text
                 assert "execution_token" not in response.text
                 assert body["authorization"] not in response.text
-                assert model.calls == 2
+                assert model.calls == 1
                 invalid = body | {"requested_output":"unknown", "authorization":"secret-never-reflect-this"}
                 response = await client.post(path, json=invalid, headers={"Authorization":"Bearer " + TOKEN})
                 assert response.status_code == 422
                 assert "secret-never-reflect-this" not in response.text
-                assert model.calls == 2
+                assert model.calls == 1
                 assert (await client.get("/internal/metrics")).status_code == 401
                 metrics = await client.get("/internal/metrics", headers={"Authorization":"Bearer " + TOKEN})
                 assert metrics.status_code == 200

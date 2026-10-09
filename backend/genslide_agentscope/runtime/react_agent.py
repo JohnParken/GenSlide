@@ -46,6 +46,7 @@ class ReActResult(BaseModel):
     history: list[dict[str, Any]] = Field(default_factory=list)
     ledger: GoalLedger | None = None
     stop_reason: str = ""
+    final_output: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReActAgent:
@@ -74,6 +75,7 @@ class ReActAgent:
         step_history: list[dict[str, Any]] = []
         iteration = 0
         final_reply = ""
+        final_output: dict[str, Any] = {}
         stop_reason = ""
         run_status = "continue"
 
@@ -102,21 +104,47 @@ class ReActAgent:
                 user_id=ctx.user_id,
                 goal=active_ledger.goal,
                 milestones=active_ledger.to_milestones_tuple(),
+                active_skill_name=ctx.extras.get("active_skill_name"),
+                skill_instructions=ctx.extras.get("skill_instructions"),
                 user_message=getattr(ctx.request, "message", ""),
+                materials_brief=ctx.extras.get("materials_brief"),
+                environment_info=ctx.extras.get("environment_info", {}),
             )
             system_prompt = self.prompt_pipeline.build_system_prompt(prompt_ctx)
 
-            # 3. Assemble current iteration payload
-            payload = {
+            # 3. Assemble current iteration payload (copy step_history so later appends do not mutate sent payload)
+            payload: dict[str, Any] = {
                 "iteration": iteration,
                 "goal": active_ledger.goal,
-                "history": step_history,
+                "history": list(step_history),
                 "instruction": (
                     "Choose next action. Return JSON conforming to ReActStep: "
-                    "{'thought': str, 'action': 'call_tool'|'update_task'|'final_reply', "
+                    "{'thought': str, 'action': 'call_tool'|'update_task'|'plan_tasks'|'final_reply', "
                     "'action_input': dict}"
                 ),
             }
+            turn_payload = ctx.extras.get("turn_payload")
+            if isinstance(turn_payload, dict):
+                for k, v in turn_payload.items():
+                    if k not in payload:
+                        payload[k] = v
+
+            # Dynamically bound materials if multi-step history growth pushes payload over 58KB budget
+            if payload.get("materials") and isinstance(payload["materials"], str):
+                import json
+                budget_cap = 58000
+                notice = "\n\n[材料已按单次安全预算做有界截取]"
+                notice_bytes = len(notice.encode("utf-8"))
+                encoded_probe = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                while len(encoded_probe) > budget_cap and len(payload["materials"]) > len(notice):
+                    overflow = len(encoded_probe) - budget_cap
+                    cur_bytes = len(payload["materials"].encode("utf-8"))
+                    target_bytes = max(notice_bytes, cur_bytes - overflow - 500)
+                    inner_slice = max(0, target_bytes - notice_bytes)
+                    payload["materials"] = (
+                        payload["materials"].encode("utf-8")[:inner_slice].decode("utf-8", errors="ignore") + notice
+                    )
+                    encoded_probe = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
             # 4. Invoke model with cancellation checking
             if asyncio.current_task() and asyncio.current_task().cancelling():
@@ -134,7 +162,20 @@ class ReActAgent:
             else:
                 step_dict = loads_repaired(str(raw_response))
 
-            step = ReActStep.model_validate(step_dict)
+            if not isinstance(step_dict, dict):
+                raise ValueError("Model output must be a JSON object")
+
+            # Support direct structured output envelope as an implicit final_reply step
+            if "action" not in step_dict and any(
+                k in step_dict for k in ("effect", "deliverable", "content", "outline", "reply", "reply_text", "answer")
+            ):
+                step = ReActStep(
+                    thought=str(step_dict.get("thought", "")),
+                    action="final_reply",
+                    action_input=dict(step_dict),
+                )
+            else:
+                step = ReActStep.model_validate(step_dict)
 
             # 6. Execute action
             observation = ""
@@ -142,8 +183,16 @@ class ReActAgent:
             step.action = action  # Canonicalize action name in step object
 
             if action == "final_reply":
-                reply_val = step.action_input.get("reply")
-                if not reply_val or not str(reply_val).strip():
+                inp = step.action_input
+                reply_val = inp.get("reply", inp.get("reply_text", inp.get("answer")))
+                effect_val = inp.get("effect") or inp.get("kind")
+                has_structured_artifact = (
+                    effect_val in {"deliverable", "outline"}
+                    or inp.get("deliverable") is not None
+                    or inp.get("content") is not None
+                    or inp.get("outline") is not None
+                )
+                if not has_structured_artifact and (not reply_val or not str(reply_val).strip()):
                     step.observation = (
                         "Error: 'final_reply' requires a non-empty 'reply' parameter in action_input. "
                         "Do not leak internal thoughts; provide the explicit user-facing response."
@@ -152,13 +201,36 @@ class ReActAgent:
                     iteration += 1
                     continue
 
-                final_reply = str(reply_val).strip()
+                final_reply = str(reply_val).strip() if reply_val is not None else ""
+                final_output = dict(inp)
                 step.observation = "Completed final reply."
                 step_history.append(step.model_dump())
                 iteration += 1
                 run_status = "completed"
                 stop_reason = "Agent provided final reply"
                 break
+
+            elif action in ("plan_tasks", "add_task"):
+                raw_tasks = step.action_input.get("tasks")
+                added_ids: list[str] = []
+                if isinstance(raw_tasks, list):
+                    for item in raw_tasks:
+                        if isinstance(item, dict) and item.get("title"):
+                            t = active_ledger.add_task(
+                                str(item["title"]),
+                                str(item.get("description", "")),
+                            )
+                            added_ids.append(t.task_id)
+                        elif isinstance(item, str) and item.strip():
+                            t = active_ledger.add_task(item.strip())
+                            added_ids.append(t.task_id)
+                elif step.action_input.get("title"):
+                    t = active_ledger.add_task(
+                        str(step.action_input["title"]),
+                        str(step.action_input.get("description", "")),
+                    )
+                    added_ids.append(t.task_id)
+                observation = f"Added {len(added_ids)} tasks to ledger: {added_ids}"
 
             elif action == "update_task":
                 task_id = str(step.action_input.get("task_id", ""))
@@ -193,7 +265,7 @@ class ReActAgent:
                     observation = f"Tool '{tool_name}' executed (mock)."
 
             else:
-                observation = f"Unrecognized action: {action}. Please use 'call_tool', 'update_task', or 'final_reply'."
+                observation = f"Unrecognized action: {action}. Please use 'call_tool', 'update_task', 'plan_tasks', or 'final_reply'."
 
             step.observation = observation
             step_history.append(step.model_dump())
@@ -206,4 +278,5 @@ class ReActAgent:
             history=step_history,
             ledger=active_ledger,
             stop_reason=stop_reason,
+            final_output=final_output,
         )

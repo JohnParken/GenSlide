@@ -4,6 +4,7 @@ import hashlib
 import json
 from typing import Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from .planning.ledger import GoalLedger
 
 Kind = Literal["writing", "document", "presentation"]
 Effect = Literal["reply", "outline", "deliverable"]
@@ -110,6 +111,7 @@ class Memory(StrictModel):
     skill_hash: str | None = Field(default=None, max_length=128)
     last_reply: str | None = Field(default=None, max_length=4000)
     pending_options: dict[str, str] = Field(default_factory=dict)
+    ledger: GoalLedger | None = None
 
     @model_validator(mode="after")
     def whitelist_requirements(self):
@@ -149,6 +151,7 @@ class ExecutionSnapshot(StrictModel):
     skill_hash: str | None = Field(default=None, max_length=128)
     last_reply: str | None = Field(default=None, max_length=4000)
     pending_options: dict[str, str] = Field(default_factory=dict)
+    ledger: GoalLedger | None = None
 
     @model_validator(mode="after")
     def validate_snapshot(self):
@@ -183,6 +186,7 @@ def snapshot_from_memory(memory: Memory) -> dict[str, Any]:
         skill_hash=memory.skill_hash,
         last_reply=memory.last_reply,
         pending_options=memory.pending_options,
+        ledger=memory.ledger,
     )
     return value.model_dump(exclude_none=True)
 
@@ -204,20 +208,7 @@ def memory_from_snapshot(snapshot: Mapping[str, Any]) -> Memory:
         skill_hash=checked.skill_hash,
         last_reply=checked.last_reply,
         pending_options=checked.pending_options,
-    )
-    checked = ExecutionSnapshot.model_validate(snapshot)
-    outline = None
-    if checked.outline is not None:
-        outline = Outline.model_validate(checked.outline)
-    return Memory(
-        target_kind=checked.target_kind,
-        requirements=checked.requirements,
-        outline=outline,
-        content=checked.content,
-        content_hash=checked.content_hash,
-        skill_id=checked.skill_id,
-        skill_version=checked.skill_version,
-        skill_hash=checked.skill_hash,
+        ledger=checked.ledger,
     )
 
 class WorkResult(StrictModel):

@@ -5,27 +5,26 @@
 
 开发 UI 的 ChatClient 先向 mock `/dev/begin` 取得授权，再调用执行 API；不能把这种服务认证模式搬到生产浏览器。
 
-当前默认执行过程：claim 可信上下文 → 恢复有界快照（含待答候选项与摘要） → 固定 Skill → 规划决策/创作（局部修改仅发目标章节以适配 60KB 上下文） → 按 effect 渲染 → 暂存上传 → BFF 原子提交结果和快照。
+当前默认执行过程：claim 可信上下文 → 恢复有界快照（含长程任务账本 `GoalLedger`、待答候选项与摘要） → 进入 8 阶段 `RuntimeEngine` 生命周期（`PRE_DISPATCH` 技能与意图校验 → `POST_DISPATCH` 任务账本恢复 → `PRE_AGENT_BUILD` 58KB 动态预算切片 → `POST_AGENT_BUILD` 五级 `PromptPipeline` 与 `ReActAgent` 装配 → `PRE_EXECUTE` 进度事件 → `ReActAgent` 多步推理/工具/账本循环 → `POST_RESPONSE` 结果与快照生成 → `FINALLY` 取消收尾保护） → 按 effect 渲染 → 暂存上传 → BFF 原子提交结果和快照。
 `reply / outline / deliverable` 是结果类别，不是用户必须依次通过的流程。
 
 > **架构状态明确**：
-> - **已在默认链路生效**：自愈式模型网关（保真 JSON 解析与思考链提取）、多轮自然语言候选项承接、局部修改章节切片防护、BFF 快照恢复与 POSIX 租约锁。
-> - **已完成独立组件**：标准 8 阶段生命周期内核（`RuntimeEngine`）、DAG 拓扑 Hook 编排、长程任务账本（`GoalLedger`）、防死循环门控（`DoomLoopGate`）与通用 `ReActAgent` 执行器。
-> - **后续演进目标**：平滑将默认 API 执行器切换至 8 阶段内核，并接入 BFF 持久任务记录与跨 Pod 重启拉起的真正持久长任务闭环。
+> - **已在默认链路全量打通**：自愈式模型网关（保真 JSON 解析、思考链剥离与模型能力缓存）、五级优先级提示词流水线（P100/P80/P60/P40/P20）、标准 8 阶段生命周期内核（`RuntimeEngine`）、长程任务账本（`GoalLedger` 跨轮与跨 Pod 快照持久化）、防死循环门控（`DoomLoopGate`）与通用 `ReActAgent` 执行器。原双步 `decide -> compose` 专属文档 `workflow.py` 已正式弃用移除。
+> - **后续演进目标**：推进 Phase 4（受控工具协调器与混合型技能沙箱）与 Phase 5（细粒度步骤级 Checkpoint 与全链路流式可观测性）。
 
 ## 后端模块（backend/genslide_agentscope）
 
 | 模块 | 职责 |
 | --- | --- |
 | `gateway/` | **自愈式模型网关**：`<think>` 思考链剥离、四级自愈式 JSON 容错解析、模型能力试错缓存 |
-| `prompts/` | **优先级提示词流水线**：P100 安全契约、P80 结构规范、P60 目标进度账本流水线组装 |
+| `prompts/` | **优先级提示词流水线**：P100 安全契约、P80 结构规范、P60 目标账本、P40 技能指令、P20 工作区上下文组装 |
 | `runtime/` | **8 阶段生命周期内核**：`Phase` 调度、DAG 拓扑 Hook 编排、取消防护、`ReActAgent` 执行器 |
 | `planning/` | **长程规划与门控**：`GoalLedger` 任务账本、步数上限、死循环熔断与完成准则门控 |
 | `api.py`、`config.py` | 内部 API、认证入口、生命周期与配置 |
-| `domain.py` | 严格请求/结果模型、可信快照 |
+| `domain.py` | 严格请求/结果模型、可信快照（含 `GoalLedger` 跨轮状态） |
 | `execution.py` | 准入、租约、版本、取消收尾、文件校验与提交 |
 | `workspace.py` | 执行实例临时目录、容量、锁与残留回收 |
-| `engine.py`、`workflow.py`、`authoring.py` | 回合决策、正文生成和局部修改 |
+| `engine.py`、`authoring.py` | 8 阶段 `RuntimeEngine` + `ReActAgent` 统一编排入口、需求确认消歧与篇幅预算 |
 | `skills.py`、`skills/` | 可信 Skill 注册和版本/hash；不执行脚本 |
 | `model.py`、`tl_provider.py`、`tl_transport.py` | 模型及 TL 协议适配（已接入 gateway 自愈解析） |
 | `attachment_policy.py`、`content_io.py` | 统一附件策略、解析与渲染 |

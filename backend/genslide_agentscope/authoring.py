@@ -1,7 +1,239 @@
-"""Framework-free writing primitives shared by guided and conversational authoring."""
+"""Framework-free writing and requirement primitives shared by runtime execution."""
+import json
 import re
 from pydantic import Field, ValidationError
 from .domain import Content, Outline, Section, ServiceError, StrictModel
+
+FIELDS = {"topic", "audience", "language", "length", "style", "purpose", "constraints"}
+_OUTPUT_KIND = {"text": "writing", "document": "document", "presentation": "presentation"}
+
+_ORDINAL_TOKENS = {
+    "1": ["第一", "第1", "前一个", "首个", "A"],
+    "2": ["第二", "第2", "后一个", "B"],
+    "3": ["第三", "第3", "C"],
+    "4": ["第四", "第4", "D"],
+}
+_CHINESE_NUMS = {"1": "一", "2": "二", "3": "三", "4": "四"}
+PREFIX_BOUND = r"(?:^|[\s,，。；;、选按用要考虑第])"
+SUFFIX_BOUND = r"(?:$|[\s,，。；;、项个种吧啦]|[^\w])"
+
+MAX_CATALOG_PAYLOAD_BYTES = 20000
+MAX_SKILL_DESC_CHARS = 120
+
+
+def _is_ambiguous_comparison_question(msg: str) -> bool:
+    """Detect whether user input is an ambiguous comparative inquiry rather than an affirmative directive."""
+    if not msg:
+        return False
+    text = msg.strip()
+
+    is_writing_topic_request = bool(
+        re.search(r"^(?:请|麻烦|帮我)?\s*(?:写|作|撰写|生成|输出|制作)\s*(?:一篇|一个|份)?.*(?:对比|比较)", text)
+    )
+    if is_writing_topic_request:
+        if re.search(r"(?:，|,)?\s*(?:可以|行|好|能|麻烦)?\s*(?:吗|呢|么)\s*[？?]?\s*$", text):
+            if not re.search(r"(?:还是|或者|哪个|哪种|怎么选|如何选)", text):
+                return False
+
+    if re.search(r"(?:还是|就|按|请|决定)\s*(?:用|选|按|采用|以|决定)", text):
+        if not re.search(r"(?:哪个|哪种|哪一个|怎么选|如何选|区别|对比一下)", text):
+            return False
+
+    if re.search(r"(?:吧|即可|就行|好了)$", text):
+        if not re.search(r"(?:哪个|哪种|哪一个|怎么选|如何选|区别|对比一下)", text):
+            return False
+
+    inquiry_phrases = (
+        "哪个好", "哪一个好", "哪个适合", "哪个更适合", "哪种更好", "怎么选", "如何选", "如何选择", "怎么选择",
+        "有什么区别", "有什么不同", "区别在哪", "对比一下", "哪个更", "选哪一个", "选哪个",
+        "哪种更", "哪个更优"
+    )
+    if any(p in text for p in inquiry_phrases):
+        return True
+
+    if re.search(r"(?:还是|或者).*(?:更好|更适合|更优|哪个好|比较好|(?:[一二三四1-4A-Za-z]|个|项|种)?\s*好(?![了好的]))", text):
+        return True
+
+    if re.search(r"(?:写|作|撰写|分析|生成|输出|制作|关于).*(?:对比|比较)", text):
+        if not re.search(r"(?:还是|或者|哪个|选哪|如何选|怎么选)", text):
+            return False
+    if re.search(r"(?:对比|比较).*(?:分析|研究|报告|文章|总结)", text):
+        if not re.search(r"(?:还是|或者|哪个|选哪|如何选|怎么选)", text):
+            return False
+
+    is_question = any(q in text for q in ("？", "?", "吗", "呢", "如何", "怎样"))
+    has_alternative = any(a in text for a in ("还是", "或者"))
+    if is_question and has_alternative:
+        return True
+
+    return False
+
+
+def _is_option_selected(user_msg: str, key: str, val: str, all_options: dict[str, str]) -> bool:
+    """Verify that the user's natural language input affirmatively and unambiguously selected this option."""
+    if not user_msg or not val:
+        return False
+    msg = user_msg.strip()
+
+    pos_idx_str = None
+    try:
+        keys_list = list(all_options.keys())
+        if key in keys_list:
+            pos_idx_str = str(keys_list.index(key) + 1)
+    except Exception:
+        pass
+
+    key_str = str(key)
+    c_num = _CHINESE_NUMS.get(key_str, key_str)
+    all_tokens = [key_str, c_num, val]
+    if key_str in _ORDINAL_TOKENS:
+        all_tokens.extend(_ORDINAL_TOKENS[key_str])
+
+    if pos_idx_str:
+        all_tokens.append(pos_idx_str)
+        all_tokens.append(_CHINESE_NUMS.get(pos_idx_str, pos_idx_str))
+        if pos_idx_str in _ORDINAL_TOKENS:
+            all_tokens.extend(_ORDINAL_TOKENS[pos_idx_str])
+
+    negation_patterns = []
+    non_letter_tokens = []
+    for t in set(all_tokens):
+        if not t:
+            continue
+        if t.isalpha() and len(t) == 1:
+            negation_patterns.append(
+                rf"(?:不|别|不要|无需|排除|免去|取消|并非)\s*(?:想|要|选|用|采纳|考虑|以)?\s*(?:第)?\s*{re.escape(t)}{SUFFIX_BOUND}"
+            )
+        else:
+            non_letter_tokens.append(re.escape(t))
+
+    if non_letter_tokens:
+        sub_pat = "|".join(non_letter_tokens)
+        negation_patterns.append(
+            rf"(?:不|别|不要|无需|排除|免去|取消|并非)\s*(?:想|要|选|用|采纳|考虑|以)?\s*(?:第)?(?:{sub_pat})"
+        )
+
+    for pat in negation_patterns:
+        if re.search(pat, msg, flags=re.IGNORECASE):
+            return False
+
+    if _is_ambiguous_comparison_question(msg):
+        return False
+
+    if val in msg:
+        return True
+
+    if key_str.isalpha() and len(key_str) == 1:
+        if re.search(rf"(?i){PREFIX_BOUND}\s*{re.escape(key_str)}\s*{SUFFIX_BOUND}", msg):
+            return True
+
+    ordinals = _ORDINAL_TOKENS.get(key_str, [])
+    for ord_token in ordinals:
+        if ord_token.isalpha() and len(ord_token) == 1:
+            if re.search(rf"(?i){PREFIX_BOUND}\s*{re.escape(ord_token)}\s*{SUFFIX_BOUND}", msg):
+                return True
+        else:
+            if ord_token in msg:
+                return True
+
+    if pos_idx_str:
+        pos_ordinals = _ORDINAL_TOKENS.get(pos_idx_str, [])
+        for ord_token in pos_ordinals:
+            if ord_token.isalpha() and len(ord_token) == 1:
+                if re.search(rf"(?i){PREFIX_BOUND}\s*{re.escape(ord_token)}\s*{SUFFIX_BOUND}", msg):
+                    return True
+            elif ord_token in msg:
+                return True
+
+    return False
+
+
+def _is_requirement_affirmed(user_msg: str, val: str, pending_options: dict[str, str]) -> bool:
+    """Verify that a requirement update value is affirmatively confirmed by the user."""
+    if not user_msg or not val:
+        return False
+    msg = user_msg.strip()
+
+    matched_opt_key = None
+    for opt_key, opt_val in pending_options.items():
+        if opt_val == val:
+            matched_opt_key = opt_key
+            break
+
+    if matched_opt_key is not None:
+        return _is_option_selected(msg, matched_opt_key, val, pending_options)
+
+    if val not in msg:
+        return False
+
+    clauses = [c.strip() for c in re.split(r"[,，;；\n]", msg) if c.strip()]
+    val_clauses = [c for c in clauses if val in c]
+    target_scope = " ".join(val_clauses) if val_clauses else msg
+
+    if _is_ambiguous_comparison_question(target_scope):
+        return False
+
+    negation_regex = re.compile(
+        rf"(?:不|别|不要|无需|排除|免去|取消|并非)\s*(?:想|要|选|用|采纳|考虑|以)?\s*{re.escape(val)}",
+        flags=re.IGNORECASE
+    )
+    if negation_regex.search(target_scope):
+        return False
+
+    return True
+
+
+def prune_catalog_for_decision(
+    catalog: list[dict],
+    requested_skill_id: str | None,
+    current_skill_id: str | None,
+    requested_output: str | None,
+) -> list[dict]:
+    """Prune and compact the skill catalog so it fits safely within model input budgets."""
+    if not catalog:
+        return []
+
+    top_priority = []
+    output_matched = []
+    others = []
+
+    req_kind = _OUTPUT_KIND.get(requested_output) if requested_output and requested_output != "auto" else None
+
+    for item in catalog:
+        s_id = item.get("skill_id")
+        if s_id and (s_id == requested_skill_id or s_id == current_skill_id):
+            top_priority.append(item)
+        elif req_kind and req_kind in item.get("supported_outputs", []):
+            output_matched.append(item)
+        else:
+            others.append(item)
+
+    output_matched.sort(key=lambda s: (-s.get("priority", 0), s.get("skill_id", "")))
+    others.sort(key=lambda s: (-s.get("priority", 0), s.get("skill_id", "")))
+
+    ordered_candidates = top_priority + output_matched + others
+
+    pruned = []
+    current_bytes = 0
+    for s in ordered_candidates:
+        desc = s.get("description", "")
+        if len(desc) > MAX_SKILL_DESC_CHARS:
+            desc = desc[:MAX_SKILL_DESC_CHARS] + "..."
+        entry = {
+            "skill_id": s["skill_id"],
+            "name": s.get("name", s["skill_id"]),
+            "description": desc,
+            "supported_outputs": s.get("supported_outputs", []),
+            "default_output": s.get("default_output", ""),
+            "priority": s.get("priority", 0),
+        }
+        entry_bytes = len(json.dumps(entry, ensure_ascii=False).encode())
+        if current_bytes + entry_bytes > MAX_CATALOG_PAYLOAD_BYTES and pruned:
+            break
+        pruned.append(entry)
+        current_bytes += entry_bytes
+
+    return pruned
 
 class SectionBatch(StrictModel):
     sections: list[Section] = Field(min_length=1, max_length=8)

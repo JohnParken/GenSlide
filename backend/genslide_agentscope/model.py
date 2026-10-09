@@ -89,6 +89,8 @@ class Model:
             key = key or env_key
             name = name or env_name
 
+        self.model_name = name
+        self.capability_cache = get_capability_cache()
         self.tl_provider = None
         if self.provider_name == "tl":
             self.tl_provider = TLProvider(base, key, name)
@@ -119,6 +121,7 @@ class Model:
         except ServiceError:
             raise
         except Exception as exc:
+            self.capability_cache.record_failure(self.provider_name, self.model_name, exc)
             raise ServiceError("MODEL_UNAVAILABLE", 502) from exc
 
     async def _reply(self, system, text):

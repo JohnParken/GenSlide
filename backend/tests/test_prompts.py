@@ -9,8 +9,11 @@ from genslide_agentscope.prompts import (
     ProtectedSecurityContributor,
     ExecutionContractContributor,
     GoalLedgerContributor,
+    SkillPromptContributor,
+    WorkspaceContextContributor,
     PromptPipeline,
     create_default_pipeline,
+    create_runtime_pipeline,
 )
 
 
@@ -125,3 +128,31 @@ def test_create_default_pipeline():
     assert "SECURITY & BOUNDARY DEFENSE" in prompt
     assert "OUTPUT FORMAT CONTRACT" in prompt
     assert "ACTIVE LONG-HORIZON MISSION" in prompt
+
+
+def test_create_runtime_pipeline_five_tiers():
+    pipeline = create_runtime_pipeline()
+    contributors = pipeline.get_sorted_contributors()
+    names = [c.name for c in contributors]
+    assert names == [
+        "protected_security",
+        "execution_contract",
+        "goal_ledger",
+        "skill_prompt",
+        "workspace_context",
+    ]
+    ctx = PromptContext(
+        goal="Draft architecture specification",
+        milestones=({"title": "Outline sections", "status": "in_progress"},),
+        active_skill_name="document",
+        skill_instructions="Use formal technical structure.",
+        materials_brief="Key metric: 99.99% SLA.",
+        environment_info={"target_kind": "document"},
+    )
+    prompt = pipeline.build_system_prompt(ctx)
+    assert "ACTIVE SKILL INSTRUCTIONS" in prompt
+    assert "Use formal technical structure." in prompt
+    assert "WORKSPACE & SESSION CONTEXT" in prompt
+    assert "Key metric: 99.99% SLA." in prompt
+    assert prompt.index("SECURITY & BOUNDARY DEFENSE") < prompt.index("ACTIVE SKILL INSTRUCTIONS")
+    assert prompt.index("ACTIVE SKILL INSTRUCTIONS") < prompt.index("WORKSPACE & SESSION CONTEXT")

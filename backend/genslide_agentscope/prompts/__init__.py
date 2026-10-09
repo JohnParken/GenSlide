@@ -4,7 +4,13 @@ from .base import PromptContext, PromptContributor
 from .security import ProtectedSecurityContributor, PROTECTED_SECURITY_PROMPT
 from .contract import ExecutionContractContributor
 from .goal import GoalLedgerContributor
-from .pipeline import PromptPipeline, create_default_pipeline
+from .pipeline import (
+    SkillPromptContributor,
+    WorkspaceContextContributor,
+    PromptPipeline,
+    create_default_pipeline,
+    create_runtime_pipeline,
+)
 
 __all__ = [
     "PromptContext",
@@ -13,6 +19,9 @@ __all__ = [
     "PROTECTED_SECURITY_PROMPT",
     "ExecutionContractContributor",
     "GoalLedgerContributor",
+    "SkillPromptContributor",
+    "WorkspaceContextContributor",
     "PromptPipeline",
     "create_default_pipeline",
+    "create_runtime_pipeline",
 ]

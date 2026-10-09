@@ -4,8 +4,8 @@ import json
 import pytest
 
 from genslide_agentscope.domain import ExecuteRequest, Memory, ServiceError
+from genslide_agentscope.engine import Engine
 from genslide_agentscope.skills import SkillRegistry
-from genslide_agentscope.workflow import execute
 
 BODY = "Use this exact instruction body for every stage."
 
@@ -117,7 +117,7 @@ def test_removed_or_changed_markdown_requires_reload(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_workflow_receives_body_and_binds_markdown_skill(tmp_path):
+async def test_engine_receives_body_and_binds_markdown_skill(tmp_path):
     write_md(tmp_path)
     registry = SkillRegistry(tmp_path)
     values = dict(engine="agentscope", tenant_id="t", user_id="u", session_id="s", runtime_epoch="e", action_id="a", authorization="x", expected_session_version=0, expected_lifecycle_version=1, mode="assistant", requested_output="text", message="Guide")
@@ -126,12 +126,19 @@ async def test_workflow_receives_body_and_binds_markdown_skill(tmp_path):
         def __init__(self): self.calls = []
         async def complete(self, system, payload):
             self.calls.append((system, payload))
-            if payload["phase"] == "decide":
-                return {"effect": "deliverable", "target_kind": "writing", "skill_id": "markdown-skill"}
-            return {"effect": "deliverable", "deliverable": {"title": "Guide", "sections": [{"title": "Intro", "body": "Text"}]}}
+            return {
+                "action": "final_reply",
+                "action_input": {
+                    "effect": "deliverable",
+                    "target_kind": "writing",
+                    "skill_id": "markdown-skill",
+                    "deliverable": {"title": "Guide", "sections": [{"title": "Intro", "body": "Text"}]},
+                },
+            }
 
     model = Model()
-    created = await execute(ExecuteRequest(**values, requested_skill_id="markdown-skill"), Memory(requirements={"topic": "Guide"}), "", model, registry)
-    assert BODY in model.calls[1][0]
+    engine = Engine(model)
+    engine.skills = registry
+    created = await engine.run("k", ExecuteRequest(**values, requested_skill_id="markdown-skill"), Memory(requirements={"topic": "Guide"}), "")
+    assert BODY in model.calls[0][0]
     assert created.memory.skill_id == "markdown-skill"
-    assert BODY in model.calls[-1][0]

@@ -4,8 +4,8 @@ import json
 import pytest
 
 from genslide_agentscope.domain import ExecuteRequest, Memory, ServiceError
+from genslide_agentscope.engine import Engine
 from genslide_agentscope.skills import SkillRegistry
-from genslide_agentscope.workflow import execute
 
 
 def skill(skill_id="custom", target_kind="writing", **kwargs):
@@ -136,7 +136,7 @@ def test_reload_reflects_metadata_changes(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_workflow_inherits_bound_skill_and_rejects_other_skill(tmp_path):
+async def test_engine_inherits_bound_skill_and_switches_when_requested(tmp_path):
     put(tmp_path, "custom", skill("custom"))
     put(tmp_path, "other", skill("other"))
     registry = SkillRegistry(tmp_path)
@@ -146,9 +146,10 @@ async def test_workflow_inherits_bound_skill_and_rejects_other_skill(tmp_path):
                   mode="assistant", requested_output="text", message="Guide")
     class Model:
         async def complete(self, system, payload):
-            if payload["phase"] == "decide": return {"effect":"reply", "target_kind":"writing", "skill_id":"custom"}
-            return {"effect":"reply", "reply":"ok"}
-    created = await execute(ExecuteRequest(**values, requested_skill_id="custom"), Memory(requirements={"topic": "Guide"}), "", Model(), registry)
+            return {"action": "final_reply", "action_input": {"effect": "reply", "target_kind": "writing", "reply": "ok"}}
+    engine = Engine(Model())
+    engine.skills = registry
+    created = await engine.run("k", ExecuteRequest(**values, requested_skill_id="custom"), Memory(requirements={"topic": "Guide"}), "")
     assert created.memory.skill_id == "custom"
-    other = await execute(ExecuteRequest(**values, requested_skill_id="other"), created.memory, "", Model(), registry)
+    other = await engine.run("k", ExecuteRequest(**values, requested_skill_id="other"), created.memory, "")
     assert other.memory.skill_id == "other"
